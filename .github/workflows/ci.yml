@@ -26,16 +26,32 @@ jobs:
       - name: Verify API
         working-directory: apps/api
         run: |
-          python -m pytest -q
           python -m ruff check app tests
           python -m mypy app
+          python -m pytest -q
+      - name: Run deterministic evals
+        working-directory: apps/api
+        run: python -m app.evals.runner
       - name: Install web
         working-directory: apps/web
         run: npm ci
       - name: Verify web
         working-directory: apps/web
         run: |
-          npm test -- --run
           npm run lint
           npm run typecheck
+          npm test -- --run
           npm run build
+      - name: Install Playwright browser
+        working-directory: apps/web
+        run: npx playwright install --with-deps chromium
+      - name: Run browser E2E
+        working-directory: apps/web
+        run: npm run test:e2e
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report/
+          if-no-files-found: ignore

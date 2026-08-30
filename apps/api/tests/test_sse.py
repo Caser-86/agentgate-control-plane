@@ -65,6 +65,22 @@ async def test_unsubscribe_removes_queue() -> None:
     assert broker.subscriber_count(run_id) == 0
 
 
+@pytest.mark.asyncio
+async def test_http_stream_cleans_up_when_client_disconnects() -> None:
+    from app.api.runs import stream_events
+
+    broker = EventBroker()
+    run_id = uuid4()
+    stream = stream_events(run_id, broker)
+    task = asyncio.create_task(stream.__anext__())
+    await asyncio.sleep(0)
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert broker.subscriber_count(run_id) == 0
+
+
 def test_sse_frame_shape() -> None:
     from app.api.runs import format_sse
 

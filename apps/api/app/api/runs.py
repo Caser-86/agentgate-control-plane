@@ -19,6 +19,7 @@ from app.schemas import (
     RunDetailResponse,
     ToolActionResponse,
 )
+from app.services.audit import redact
 from app.services.events import EventBroker, RunEvent, event_broker, event_to_sse
 from app.services.runs import RunService
 
@@ -41,6 +42,8 @@ def to_run_response(run: AgentRun) -> AgentRunResponse:
 
 def to_action_response(action: ToolAction) -> ToolActionResponse:
     arguments = _parse_json(action.arguments_json)
+    safe_arguments = redact(arguments)
+    safe_result = redact(_parse_json(action.result_json))
     return ToolActionResponse(
         id=action.id,
         run_id=action.run_id,
@@ -49,8 +52,8 @@ def to_action_response(action: ToolAction) -> ToolActionResponse:
         risk_level=action.risk_level.value,
         policy_decision=action.policy_decision.value,
         status=action.status.value,
-        arguments=arguments if isinstance(arguments, dict) else {},
-        result=_parse_json(action.result_json),
+        arguments=safe_arguments if isinstance(safe_arguments, dict) else {},
+        result=safe_result,
         reason=action.reason,
         created_at=action.created_at,
         decided_at=action.decided_at,
@@ -65,7 +68,7 @@ def to_audit_response(event: AuditEvent) -> AuditEventResponse:
         action_id=event.action_id,
         event_type=event.event_type,
         actor=event.actor,
-        payload=_parse_json(event.payload_json) or {},
+        payload=redact(_parse_json(event.payload_json) or {}),
         created_at=event.created_at,
     )
 
@@ -149,6 +152,7 @@ async def stream_events(
     finally:
         event_task.cancel()
         heartbeat_task.cancel()
+        await asyncio.gather(event_task, heartbeat_task, return_exceptions=True)
         await stream.aclose()
 
 

@@ -59,6 +59,13 @@ class MockLLMProvider:
                         "reason": "recover the degraded payments service safely",
                     },
                 )
+            latest_restart = self._decode(restart_results[-1])
+            if latest_restart.get("health") == "healthy":
+                return self._propose(
+                    messages,
+                    "get_service_health",
+                    {"service": latest_health.get("service", "payments-api")},
+                )
 
         return self._final("The service investigation is complete.")
 

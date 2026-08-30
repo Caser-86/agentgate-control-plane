@@ -1,3 +1,4 @@
+import json
 from collections.abc import Generator
 from uuid import uuid4
 
@@ -5,8 +6,10 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session
 
+from app.api.runs import to_action_response
 from app.db import create_db_and_tables, create_db_engine, get_session, seed_demo_state
 from app.main import app
+from app.models import ActionStatus, PolicyDecision, RiskLevel, ToolAction
 
 
 @pytest.fixture
@@ -75,3 +78,29 @@ def test_api_validation_uses_unified_error_shape(api_client: TestClient) -> None
 
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "validation_error"
+
+
+def test_run_detail_redacts_sensitive_action_fields(api_client: TestClient) -> None:
+    action = ToolAction(
+        run_id=uuid4(),
+        tool_call_id="call-redact",
+        tool_name="ops.restart_service",
+        risk_level=RiskLevel.HIGH,
+        policy_decision=PolicyDecision.REQUIRE_APPROVAL,
+        status=ActionStatus.PENDING_APPROVAL,
+        arguments_json=json.dumps(
+            {"service": "payments-api", "api_key": "secret", "nested": {"token": "value"}}
+        ),
+        result_json=json.dumps({"authorization": "Bearer secret"}),
+        idempotency_key="redaction-test",
+        reason="requires human approval",
+    )
+
+    response = to_action_response(action)
+
+    assert response.arguments == {
+        "service": "payments-api",
+        "api_key": "***REDACTED***",
+        "nested": {"token": "***REDACTED***"},
+    }
+    assert response.result == {"authorization": "***REDACTED***"}
