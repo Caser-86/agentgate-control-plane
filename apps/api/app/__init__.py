@@ -1,0 +1,1 @@
+"""AgentGate API application package."""
