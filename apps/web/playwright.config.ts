@@ -12,9 +12,10 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,
   reporter: process.env.CI ? "dot" : "list",
   use: {
+    ...devices["Desktop Chrome"],
     baseURL: "http://127.0.0.1:5173",
     trace: "on-first-retry",
-    ...devices["Desktop Chrome"],
+    viewport: { width: 1440, height: 900 },
   },
   webServer: [
     {

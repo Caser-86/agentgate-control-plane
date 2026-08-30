@@ -10,7 +10,7 @@ from app.services.audit import AuditService, redact
 
 def test_redact_secrets_recursively() -> None:
     payload = {
-        "authorization": "Bearer abc",
+        "authorization": "credential-placeholder",
         "nested": {"api_key": "secret", "safe": "visible"},
         "items": [{"password": "p"}, {"token": "t"}],
     }

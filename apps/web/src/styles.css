@@ -156,8 +156,12 @@ pre { overflow: auto; margin: 10px 0 0; padding: 12px; border: 1px solid var(--l
 .timeline-body p { margin: 0 0 8px; color: var(--muted); font-size: 12px; line-height: 1.55; }
 .actor-label { display: block; color: #668582; }
 
-.approval-card { display: grid; grid-template-columns: 7px minmax(0, 1fr); overflow: hidden; margin-bottom: 22px; border: 1px solid #795331; border-radius: var(--radius-lg); background: #171b18; box-shadow: var(--shadow); }
+.approval-card { display: grid; grid-template-columns: 30px minmax(0, 1fr); overflow: hidden; margin-bottom: 22px; border: 1px solid #795331; border-radius: var(--radius-lg); background: #171b18; box-shadow: var(--shadow); }
 .decision-rail { background: var(--medium); }
+.decision-rail { display: flex; align-items: center; justify-content: center; gap: 10px; color: #352511; }
+.decision-rail span, .decision-rail strong { writing-mode: vertical-rl; transform: rotate(180deg); }
+.decision-rail span { font-family: "SFMono-Regular", Consolas, monospace; font-size: 7px; letter-spacing: 0.12em; }
+.decision-rail strong { font-family: "SFMono-Regular", Consolas, monospace; font-size: 9px; font-weight: 700; letter-spacing: 0.08em; }
 .rail-high, .rail-critical { background: var(--high); }
 .rail-low { background: var(--low); }
 .approval-content { padding: 25px 27px 23px; }

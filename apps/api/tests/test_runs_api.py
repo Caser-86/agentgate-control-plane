@@ -91,7 +91,7 @@ def test_run_detail_redacts_sensitive_action_fields(api_client: TestClient) -> N
         arguments_json=json.dumps(
             {"service": "payments-api", "api_key": "secret", "nested": {"token": "value"}}
         ),
-        result_json=json.dumps({"authorization": "Bearer secret"}),
+        result_json=json.dumps({"authorization": "credential-placeholder"}),
         idempotency_key="redaction-test",
         reason="requires human approval",
     )

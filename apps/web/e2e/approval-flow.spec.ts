@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test("approves a degraded-service restart and preserves an auditable trace", async ({ page }) => {
+test("approves a degraded-service restart and preserves an auditable trace", async ({ page, browser }) => {
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Runs", exact: true })).toBeVisible();
 
@@ -16,6 +16,9 @@ test("approves a degraded-service restart and preserves an auditable trace", asy
   await expect(approval.getByText("Medium risk", { exact: true })).toBeVisible();
   await expect(approval.getByText("Medium-risk actions require explicit human approval.", { exact: true })).toBeVisible();
   await expect(approval.locator("pre")).toContainText('"service": "payments-api"');
+  if (process.env.AGENTGATE_CAPTURE_SCREENSHOT === "1") {
+    await page.screenshot({ path: "../../docs/assets/local-demo.png", fullPage: true });
+  }
 
   const waitingBody = await page.locator("body").innerText();
   expect(waitingBody).not.toContain("api_key");
@@ -36,4 +39,14 @@ test("approves a degraded-service restart and preserves an auditable trace", asy
   const auditBody = await page.locator("body").innerText();
   expect(auditBody).not.toContain("api_key");
   expect(auditBody).not.toContain("Bearer ");
+
+  const mobilePage = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  await mobilePage.goto("http://127.0.0.1:5173/");
+  await expect(mobilePage.getByRole("heading", { name: "Runs", exact: true })).toBeVisible();
+  const dimensions = await mobilePage.evaluate(() => ({
+    clientWidth: document.documentElement.clientWidth,
+    scrollWidth: document.documentElement.scrollWidth,
+  }));
+  expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth);
+  await mobilePage.close();
 });

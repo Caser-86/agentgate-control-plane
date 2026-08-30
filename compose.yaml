@@ -2,17 +2,28 @@ services:
   api:
     build: ./apps/api
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       AGENTGATE_LLM_PROVIDER: ${AGENTGATE_LLM_PROVIDER:-mock}
-      AGENTGATE_DATABASE_URL: sqlite:///./data/agentgate.db
+      AGENTGATE_DATABASE_URL: sqlite:////app/data/agentgate.db
+      AGENTGATE_WEB_ORIGIN: ${AGENTGATE_WEB_ORIGIN:-http://localhost:5173}
     volumes:
       - ./data:/app/data
     ports:
-      - "8000:8000"
+      - "${AGENTGATE_API_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
   web:
-    build: ./apps/web
+    build:
+      context: ./apps/web
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     ports:
-      - "5173:80"
+      - "${AGENTGATE_WEB_PORT:-5173}:80"

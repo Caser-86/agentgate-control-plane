@@ -3,6 +3,7 @@
 node_modules/
 dist/
 data/*.db
+apps/api/data/*.db
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
