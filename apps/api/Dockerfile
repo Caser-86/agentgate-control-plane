@@ -8,17 +8,13 @@ WORKDIR /app
 
 COPY pyproject.toml ./
 COPY app ./app
-COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 RUN pip install . \
     && useradd --create-home --uid 10001 agentgate \
     && mkdir -p /app/data \
-    && chown -R agentgate:agentgate /app \
-    && chmod 755 /usr/local/bin/docker-entrypoint.sh
+    && chown -R agentgate:agentgate /app
 
-USER root
-
-ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+USER agentgate
 
 EXPOSE 8000
 
