@@ -18,6 +18,7 @@ from app.models import (
 from app.policy import PolicyEngine
 from app.repositories import ActionRepository, AuditRepository, RunRepository
 from app.services.audit import AuditService
+from app.services.events import EventBroker, event_broker
 from app.services.executor import ToolExecutor
 from app.tools.registry import ToolRegistry, UnknownToolError
 
@@ -33,6 +34,7 @@ class AgentRunner:
         registry: ToolRegistry | None = None,
         max_steps: int = 8,
         run_timeout_seconds: float = 120,
+        events: EventBroker | None = None,
     ) -> None:
         self.session = session
         self.provider = provider
@@ -50,6 +52,7 @@ class AgentRunner:
         )
         self.max_steps = max_steps
         self.run_timeout_seconds = run_timeout_seconds
+        self.events = events or event_broker
 
     def create_run(self, user_request: str) -> AgentRun:
         run = self.run_repository.create(user_request, self.provider_name, self.model)
@@ -82,6 +85,7 @@ class AgentRunner:
             self.run_repository.set_status(
                 run_id, {RunStatus.QUEUED, RunStatus.WAITING_APPROVAL}, RunStatus.RUNNING
             )
+            await self.events.publish(run_id, "run.updated", {"status": RunStatus.RUNNING.value})
         messages = run.messages()
 
         while True:
@@ -99,6 +103,9 @@ class AgentRunner:
 
             if not turn.tool_calls:
                 self.run_repository.set_status(run_id, {RunStatus.RUNNING}, RunStatus.COMPLETED)
+                await self.events.publish(
+                    run_id, "run.updated", {"status": RunStatus.COMPLETED.value}
+                )
                 self.audit.append(
                     run_id,
                     "run.completed",
@@ -182,6 +189,11 @@ class AgentRunner:
             status=action_status,
             reason=policy_result.reason,
         )
+        await self.events.publish(
+            run_id,
+            "action.updated",
+            {"action_id": str(action.id), "status": action.status.value},
+        )
         self.audit.append(
             run_id,
             "policy.decision",
@@ -197,6 +209,11 @@ class AgentRunner:
 
         if policy_result.decision is PolicyDecision.REQUIRE_APPROVAL:
             self.run_repository.set_status(run_id, {RunStatus.RUNNING}, RunStatus.WAITING_APPROVAL)
+            await self.events.publish(
+                run_id,
+                "run.updated",
+                {"status": RunStatus.WAITING_APPROVAL.value, "action_id": str(action.id)},
+            )
             self.audit.append(
                 run_id,
                 "run.waiting_approval",
@@ -212,6 +229,11 @@ class AgentRunner:
             return json.dumps(result), False
 
         executed = await self.executor.execute(action.id)
+        await self.events.publish(
+            run_id,
+            "action.updated",
+            {"action_id": str(action.id), "status": executed.status.value},
+        )
         return executed.result_json or json.dumps({"error": "tool returned no result"}), False
 
     def _create_action(

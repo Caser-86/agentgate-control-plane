@@ -1,0 +1,168 @@
+import asyncio
+import json
+from collections.abc import AsyncIterator
+from typing import Annotated, cast
+from uuid import UUID
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi.responses import StreamingResponse
+from sqlmodel import Session
+
+from app.config import get_settings
+from app.db import get_session
+from app.models import AgentRun, AuditEvent, ToolAction
+from app.repositories import ActionRepository, AuditRepository, RunRepository
+from app.schemas import (
+    AgentRunResponse,
+    AuditEventResponse,
+    CreateRunRequest,
+    RunDetailResponse,
+    ToolActionResponse,
+)
+from app.services.events import EventBroker, RunEvent, event_broker, event_to_sse
+from app.services.runs import RunService
+
+router = APIRouter(prefix="/api/runs", tags=["runs"])
+SessionDep = Annotated[Session, Depends(get_session)]
+
+
+def _parse_json(value: str | None) -> object | None:
+    if value is None:
+        return None
+    try:
+        return cast(object, json.loads(value))
+    except json.JSONDecodeError:
+        return {"raw": value}
+
+
+def to_run_response(run: AgentRun) -> AgentRunResponse:
+    return AgentRunResponse.model_validate(run, from_attributes=True)
+
+
+def to_action_response(action: ToolAction) -> ToolActionResponse:
+    arguments = _parse_json(action.arguments_json)
+    return ToolActionResponse(
+        id=action.id,
+        run_id=action.run_id,
+        tool_call_id=action.tool_call_id,
+        tool_name=action.tool_name,
+        risk_level=action.risk_level.value,
+        policy_decision=action.policy_decision.value,
+        status=action.status.value,
+        arguments=arguments if isinstance(arguments, dict) else {},
+        result=_parse_json(action.result_json),
+        reason=action.reason,
+        created_at=action.created_at,
+        decided_at=action.decided_at,
+        executed_at=action.executed_at,
+    )
+
+
+def to_audit_response(event: AuditEvent) -> AuditEventResponse:
+    return AuditEventResponse(
+        id=event.id,
+        run_id=event.run_id,
+        action_id=event.action_id,
+        event_type=event.event_type,
+        actor=event.actor,
+        payload=_parse_json(event.payload_json) or {},
+        created_at=event.created_at,
+    )
+
+
+def format_sse(event_id: int, event_type: str, payload: dict[str, object]) -> str:
+    return (
+        f"id: {event_id}\n"
+        f"event: {event_type}\n"
+        f"data: {json.dumps(payload, ensure_ascii=False, default=str)}\n\n"
+    )
+
+
+def _final_text(run: AgentRun) -> str | None:
+    for message in reversed(run.messages()):
+        if message.get("role") == "assistant" and isinstance(message.get("content"), str):
+            return str(message["content"])
+    return None
+
+
+@router.post("", response_model=AgentRunResponse, status_code=202)
+def create_run(
+    request: CreateRunRequest,
+    background_tasks: BackgroundTasks,
+    session: SessionDep,
+) -> AgentRunResponse:
+    try:
+        run = RunService(session, get_settings()).create(request.user_request, background_tasks)
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "provider_error", "message": str(exc)},
+        ) from exc
+    return to_run_response(run)
+
+
+@router.get("", response_model=list[AgentRunResponse])
+def list_runs(session: SessionDep) -> list[AgentRunResponse]:
+    return [to_run_response(run) for run in RunRepository(session).list()]
+
+
+@router.get("/{run_id}", response_model=RunDetailResponse)
+def get_run(run_id: UUID, session: SessionDep) -> RunDetailResponse:
+    run = RunRepository(session).get(run_id)
+    if run is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "not_found", "message": "run was not found"},
+        )
+    return RunDetailResponse(
+        **to_run_response(run).model_dump(),
+        actions=[
+            to_action_response(action)
+            for action in ActionRepository(session).list_for_run(run_id)
+        ],
+        audit_events=[to_audit_response(event) for event in AuditRepository(session).list(run_id)],
+        final_text=_final_text(run),
+    )
+
+
+async def stream_events(
+    run_id: UUID, broker: EventBroker = event_broker
+) -> AsyncIterator[str]:
+    stream = broker.subscribe(run_id)
+    event_task: asyncio.Task[RunEvent] = asyncio.create_task(stream.__anext__())
+    heartbeat_task: asyncio.Task[None] = asyncio.create_task(asyncio.sleep(15))
+    try:
+        while True:
+            done, _ = await asyncio.wait(
+                {event_task, heartbeat_task}, return_when=asyncio.FIRST_COMPLETED
+            )
+            if heartbeat_task in done:
+                yield ": heartbeat\n\n"
+                heartbeat_task = asyncio.create_task(asyncio.sleep(15))
+            if event_task in done:
+                try:
+                    event = event_task.result()
+                except StopAsyncIteration:
+                    return
+                yield event_to_sse(event)
+                event_task = asyncio.create_task(stream.__anext__())
+    finally:
+        event_task.cancel()
+        heartbeat_task.cancel()
+        await stream.aclose()
+
+
+@router.get("/{run_id}/events")
+async def run_events(
+    run_id: UUID, session: SessionDep
+) -> StreamingResponse:
+    if RunRepository(session).get(run_id) is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "not_found", "message": "run was not found"},
+        )
+    return StreamingResponse(
+        stream_events(run_id),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )

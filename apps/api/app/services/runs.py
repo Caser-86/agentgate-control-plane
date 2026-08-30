@@ -7,6 +7,7 @@ from app.llm.mock import MockLLMProvider
 from app.llm.openai_compatible import OpenAICompatibleProvider
 from app.models import AgentRun
 from app.services.agent_loop import AgentRunner
+from app.services.events import event_broker
 
 
 def build_provider(settings: Settings) -> LLMProvider:
@@ -37,6 +38,7 @@ class RunService:
             model=self.settings.llm_model,
             max_steps=self.settings.max_steps,
             run_timeout_seconds=self.settings.run_timeout_seconds,
+            events=event_broker,
         )
         run = runner.create_run(user_request)
         background_tasks.add_task(runner.resume_run, run.id)
