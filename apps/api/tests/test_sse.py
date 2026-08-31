@@ -1,7 +1,7 @@
 import asyncio
 import json
 from collections.abc import AsyncIterator
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -176,6 +176,66 @@ def test_http_sse_stream_has_durable_event_headers(
     assert response.headers["cache-control"] == "no-cache"
     assert response.headers["x-accel-buffering"] == "no"
     assert "id: 7" in response.text
+
+
+def test_http_run_stream_replays_approved_action_events_from_database(
+    monkeypatch: pytest.MonkeyPatch, auth_client: tuple[TestClient, object, object]
+) -> None:
+    client, engine, token_file = auth_client
+    from app.api import runs as runs_api
+    from app.services.outbox import stream_outbox_events
+
+    with Session(engine) as session:
+        seed_demo_state(session)
+        run = RunRepository(session).create("Inspect payments", "mock", "mock")
+        action = ToolAction(
+            run_id=run.id,
+            tool_call_id="http-approved-call",
+            tool_name="get_service_health",
+            risk_level=RiskLevel.LOW,
+            policy_decision=PolicyDecision.REQUIRE_APPROVAL,
+            status=ActionStatus.APPROVED,
+            arguments_json=json.dumps({"service": "payments-api"}),
+            reason="approved by operator",
+            idempotency_key="http-approved-action-event",
+        )
+        session.add(action)
+        session.commit()
+        asyncio.run(ToolExecutor(session).execute(action.id))
+        run_id, action_id = run.id, action.id
+
+    async def finite_database_stream(run_id: UUID, cursor: int) -> AsyncIterator[str]:
+        stream = stream_outbox_events(
+            lambda: Session(engine), resource_id=run_id, cursor=cursor, poll_interval=0.01
+        )
+        frame_count = 2 if cursor == 0 else 1
+        try:
+            for _ in range(frame_count):
+                yield await anext(stream)
+        finally:
+            await stream.aclose()
+
+    monkeypatch.setattr(runs_api, "stream_run_events", finite_database_stream)
+    authenticate_client(client, token_file)
+    first = client.get(f"/api/runs/{run_id}/events?after=0")
+    first_ids = [
+        int(line.removeprefix("id: "))
+        for line in first.text.splitlines()
+        if line.startswith("id: ")
+    ]
+    replay = client.get(
+        f"/api/runs/{run_id}/events?after={first_ids[1]}",
+        headers={"Last-Event-ID": str(first_ids[0])},
+    )
+
+    assert first.status_code == 200
+    assert first_ids == sorted(first_ids)
+    assert first.text.count(str(action_id)) == 2
+    assert '"status": "running"' in first.text
+    assert '"status": "succeeded"' in first.text
+    assert replay.text.count(str(action_id)) == 1
+    assert f"id: {first_ids[1]}" in replay.text
+    assert '"status": "succeeded"' in replay.text
 
 
 def test_generic_events_stream_accepts_events_without_run_id(

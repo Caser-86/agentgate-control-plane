@@ -25,3 +25,10 @@ Task 6 request-bound `BackgroundTasks` behavior was intentionally retained; no W
 - Changed executor `action.updated` Outbox events to use the owning `run_id` as `resource_id`; `action_id` remains in the payload. This preserves run-scoped SSE replay without changing the Outbox schema and leaves generic no-run events unchanged.
 - Added a real run endpoint handler regression: an approved action is executed, its running and succeeded events are read from `/api/runs/{run_id}/events`, and reconnecting with `Last-Event-ID` plus `after` replays the next sequence exactly once.
 - Focused command: `python -m pytest tests/test_sse.py tests/test_outbox_stream.py tests/test_agent_loop.py tests/test_approvals.py tests/test_executor.py -q` — 27 passed.
+
+## Fix Round 2
+
+- Added a FastAPI `TestClient` integration regression for `GET /api/runs/{run_id}/events`. The test creates a run and an approved action in the fixture database, executes it, and lets the real Outbox reader provide a finite number of frames so the HTTP response completes.
+- The first request replays the action `running` and `succeeded` frames. A second HTTP request sends both `Last-Event-ID` and `after`; it replays only the next persisted sequence, proving run-scoped cursor recovery does not duplicate the action event.
+- Focused command: `python -m pytest tests/test_sse.py tests/test_outbox_stream.py tests/test_executor.py -q` — 18 passed.
+- Static commands: `python -m ruff check app tests` and `python -m mypy app` — passed.
