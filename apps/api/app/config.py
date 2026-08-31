@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -15,7 +16,13 @@ class Settings(BaseSettings):
     llm_base_url: str | None = None
     llm_api_key: str | None = None
     llm_model: str = "mock-operations-agent"
-    database_url: str = "sqlite:///./data/agentgate.db"
+    database_url: str = "postgresql+psycopg://agentgate:agentgate@postgres:5432/agentgate"
+    database_migration_required: bool = True
+    worker_lease_seconds: int = 30
+    outbox_batch_size: int = 100
+    auth_bootstrap_token_file: str = "/app/data/bootstrap-token"
+    environment: str = Field(default="production", validation_alias="AGENTGATE_ENV")
+    seed_demo: bool = Field(default=False, validation_alias="AGENTGATE_SEED_DEMO")
     max_steps: int = 8
     tool_timeout_seconds: int = 10
     run_timeout_seconds: int = 120

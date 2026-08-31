@@ -1,4 +1,17 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: agentgate
+      POSTGRES_USER: agentgate
+      POSTGRES_PASSWORD: ${AGENTGATE_POSTGRES_PASSWORD:-agentgate}
+    volumes:
+      - agentgate-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agentgate -d agentgate"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
   api:
     build: ./apps/api
     env_file:
@@ -6,12 +19,15 @@ services:
         required: false
     environment:
       AGENTGATE_LLM_PROVIDER: ${AGENTGATE_LLM_PROVIDER:-mock}
-      AGENTGATE_DATABASE_URL: sqlite:////app/data/agentgate.db
+      AGENTGATE_DATABASE_URL: postgresql+psycopg://agentgate:${AGENTGATE_POSTGRES_PASSWORD:-agentgate}@postgres:5432/agentgate
       AGENTGATE_WEB_ORIGIN: ${AGENTGATE_WEB_ORIGIN:-http://localhost:5173}
     volumes:
       - ./data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
     ports:
-      - "${AGENTGATE_API_PORT:-8000}:8000"
+      - "127.0.0.1:${AGENTGATE_API_PORT:-8000}:8000"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
       interval: 5s
@@ -26,4 +42,7 @@ services:
       api:
         condition: service_healthy
     ports:
-      - "${AGENTGATE_WEB_PORT:-5173}:80"
+      - "127.0.0.1:${AGENTGATE_WEB_PORT:-5173}:80"
+
+volumes:
+  agentgate-postgres-data:

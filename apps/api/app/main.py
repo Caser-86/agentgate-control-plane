@@ -13,7 +13,7 @@ from app.api.health import router as health_router
 from app.api.policies import router as policies_router
 from app.api.runs import router as runs_router
 from app.config import get_settings
-from app.db import create_db_and_tables, get_engine, seed_demo_state
+from app.db import database_schema_is_ready, get_engine, seed_demo_state
 
 settings = get_settings()
 
@@ -21,9 +21,13 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     engine = get_engine()
-    create_db_and_tables(engine)
-    with Session(engine) as session:
-        seed_demo_state(session)
+    is_sqlite_test_engine = str(engine.url).startswith("sqlite")
+    if settings.database_migration_required and not is_sqlite_test_engine:
+        if not database_schema_is_ready(engine):
+            raise RuntimeError("database_schema_not_ready: run alembic upgrade head")
+    if settings.environment == "development" and settings.seed_demo:
+        with Session(engine) as session:
+            seed_demo_state(session)
     yield
 
 

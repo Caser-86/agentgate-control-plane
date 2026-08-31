@@ -1,6 +1,11 @@
 from collections.abc import Generator
 from functools import lru_cache
+from pathlib import Path
 
+from alembic import command
+from alembic.config import Config
+from alembic.runtime.migration import MigrationContext
+from alembic.script import ScriptDirectory
 from sqlalchemy.engine import Engine
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
@@ -23,7 +28,29 @@ def get_engine() -> Engine:
 
 
 def create_db_and_tables(engine: Engine) -> None:
+    """Create SQLite tables for isolated unit-test engines only."""
     SQLModel.metadata.create_all(engine)
+
+
+def _alembic_config(database_url: str) -> Config:
+    api_root = Path(__file__).resolve().parent.parent
+    config = Config(str(api_root / "alembic.ini"))
+    config.set_main_option("sqlalchemy.url", database_url)
+    return config
+
+
+def upgrade_to_head(database_url: str) -> None:
+    """Run Alembic upgrade head for an explicit database URL."""
+    command.upgrade(_alembic_config(database_url), "head")
+
+
+def database_schema_is_ready(engine: Engine) -> bool:
+    """Return whether the database records the current Alembic head revision."""
+    config = _alembic_config(str(engine.url))
+    script = ScriptDirectory.from_config(config)
+    with engine.connect() as connection:
+        context = MigrationContext.configure(connection)
+        return context.get_current_revision() == script.get_current_head()
 
 
 def get_session() -> Generator[Session, None, None]:
