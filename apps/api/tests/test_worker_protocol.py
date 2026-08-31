@@ -7,8 +7,9 @@ from sqlmodel import Session, select
 from app.auth.models import ClientToken
 from app.auth.security import digest_secret
 from app.control.enums import TaskKind, TaskStatus
-from app.control.models import ControlTask, OutboxEvent, WorkerRegistration
+from app.control.models import ControlTask, OutboxEvent, WorkerExecutionGrant, WorkerRegistration
 from app.control.repositories import enqueue_task
+from app.models import utc_now
 
 PROTOCOL_VERSION = "1.0"
 SELF_CHECK_CAPABILITY = "platform.self_check"
@@ -228,6 +229,84 @@ def test_start_and_complete_require_claim_owner_and_request_digest(
         assert task.result == {"status": "succeeded"}
         assert len(events) == 1
         assert events[0].payload == {"status": "succeeded", "task_id": str(task_id)}
+
+
+def test_recovered_native_task_retires_stale_grant_and_allows_new_owner_to_finish(
+    auth_client: tuple[TestClient, Engine, object],
+) -> None:
+    client, engine, _ = auth_client
+    owner = _register_worker(client, engine, name="expired-owner")
+    successor = _register_worker(client, engine, name="recovered-successor")
+    task_id = _enqueue_self_check(engine, "native-recovery-grant")
+    first_claim = client.post(
+        "/api/v1/worker/claim",
+        headers=_worker_headers(owner),
+        json={"protocol_version": PROTOCOL_VERSION, "capabilities": [SELF_CHECK_CAPABILITY]},
+    ).json()
+    digest = first_claim["request_digest"]
+    assert client.post(
+        f"/api/v1/worker/tasks/{task_id}/start",
+        headers=_worker_headers(owner),
+        json={"protocol_version": PROTOCOL_VERSION, "request_digest": digest},
+    ).status_code == 204
+    with Session(engine) as session:
+        task = session.get(ControlTask, task_id)
+        assert task is not None and task.lease_expires_at is not None
+        task.lease_expires_at = utc_now()
+        session.add(task)
+        session.commit()
+        stale_grant = session.get(WorkerExecutionGrant, task_id)
+        assert stale_grant is not None
+
+    assert client.post(
+        "/api/v1/worker/claim",
+        headers=_worker_headers(successor),
+        json={"protocol_version": PROTOCOL_VERSION, "capabilities": [SELF_CHECK_CAPABILITY]},
+    ).json() is None
+    with Session(engine) as session:
+        task = session.get(ControlTask, task_id)
+        assert task is not None
+        assert session.get(WorkerExecutionGrant, task_id) is None
+        task.available_at = utc_now()
+        session.add(task)
+        session.commit()
+    second_claim = client.post(
+        "/api/v1/worker/claim",
+        headers=_worker_headers(successor),
+        json={"protocol_version": PROTOCOL_VERSION, "capabilities": [SELF_CHECK_CAPABILITY]},
+    ).json()
+    assert second_claim is not None
+    second_digest = second_claim["request_digest"]
+    stale_start = client.post(
+        f"/api/v1/worker/tasks/{task_id}/start",
+        headers=_worker_headers(owner),
+        json={"protocol_version": PROTOCOL_VERSION, "request_digest": digest},
+    )
+    assert stale_start.status_code == 403
+    assert client.post(
+        f"/api/v1/worker/tasks/{task_id}/start",
+        headers=_worker_headers(successor),
+        json={"protocol_version": PROTOCOL_VERSION, "request_digest": second_digest},
+    ).status_code == 204
+    assert client.post(
+        f"/api/v1/worker/tasks/{task_id}/complete",
+        headers=_worker_headers(successor),
+        json={
+            "protocol_version": PROTOCOL_VERSION,
+            "request_digest": second_digest,
+            "result": {"status": "succeeded"},
+        },
+    ).status_code == 200
+    stale_complete = client.post(
+        f"/api/v1/worker/tasks/{task_id}/complete",
+        headers=_worker_headers(owner),
+        json={
+            "protocol_version": PROTOCOL_VERSION,
+            "request_digest": digest,
+            "result": {"status": "succeeded"},
+        },
+    )
+    assert stale_complete.status_code == 403
 
 
 def test_result_report_replays_only_the_identical_completed_result(

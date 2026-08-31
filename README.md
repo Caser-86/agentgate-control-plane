@@ -21,12 +21,13 @@ The repository is intentionally scoped to agent action governance. It does not p
 ```mermaid
 flowchart LR
     Browser[React console] --> API[FastAPI]
+    API --> Queue[Durable PostgreSQL queue]
+    Queue --> ControlWorker[control-worker]
     API --> Runner[Checkpointed AgentRunner]
     Runner --> Policy[Fail-closed PolicyEngine]
     Runner --> Executor[Idempotent ToolExecutor]
     Executor --> DB[(PostgreSQL + audit)]
     API --> Scheduler[scheduler]
-    API --> ControlWorker[control-worker]
     Scheduler --> DB
     ControlWorker --> DB
     Runner --> LLM[Mock or OpenAI-compatible provider]
@@ -111,7 +112,7 @@ compose.yaml    PostgreSQL + API + scheduler + control-worker + Web packaging
 
 ## Phase 0 boundary
 
-Phase 0 的 Compose 可靠底座只执行只读检查、认证、持久化队列、迁移和 Worker self-check；API 不直接操作 Windows 宿主机，且不存在真实服务重启、任意 Shell、任意 PowerShell、文件写入或密钥操作。高权限能力只预留给后续原生 Windows Worker 阶段。
+Phase 0 的 Compose 可靠底座只执行只读检查、认证、持久化队列、迁移和 `platform.self_check` 原生 Worker self-check；API 不直接操作 Windows 宿主机，且不存在真实服务重启、任意 Shell、任意 PowerShell、文件写入或密钥操作。高权限能力只预留给后续原生 Windows Worker 阶段。
 
 ## Tradeoffs and limitations
 

@@ -1,10 +1,11 @@
 from collections.abc import Generator
 from uuid import UUID
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
-from app.control.models import ControlTask
+from app.control.models import ControlTask, OutboxEvent
 from app.db import create_db_and_tables, create_db_engine, get_session
 from app.main import app
 from app.models import AuditEvent
@@ -151,6 +152,97 @@ def test_check_status_reads_the_submitted_task_with_check_scope(
     assert status.json()["status"] == "queued"
 
 
+def test_check_status_and_idempotency_are_scoped_to_submitter(
+    auth_client: tuple[TestClient, object, object]
+) -> None:
+    client, engine, token_file = auth_client
+    first_token = _adapter_token(client, token_file, ["propose:checks"])
+    csrf = client.get("/api/auth/csrf").json()["csrf_token"]
+    second_token = client.post(
+        "/api/auth/tokens",
+        json={"name": "second-adapter", "scopes": ["propose:checks"]},
+        headers={"Origin": "http://localhost:5173", "X-CSRF-Token": csrf},
+    ).json()["token"]
+    payload = {
+        "check_type": "platform.self_check",
+        "target": "local",
+        "parameters": {},
+        "idempotency_key": "same-key-two-clients",
+    }
+    first = client.post(
+        "/api/v1/checks", headers={"Authorization": f"Bearer {first_token}"}, json=payload
+    )
+    second = client.post(
+        "/api/v1/checks", headers={"Authorization": f"Bearer {second_token}"}, json=payload
+    )
+
+    assert first.status_code == 201
+    assert second.status_code == 201
+    assert second.json()["id"] != first.json()["id"]
+    hidden = client.get(
+        f"/api/v1/checks/{first.json()['id']}",
+        headers={"Authorization": f"Bearer {second_token}"},
+    )
+    assert hidden.status_code == 404
+    assert "task" not in hidden.text.lower()
+    with Session(engine) as session:
+        assert len(session.exec(select(ControlTask)).all()) == 2
+
+
+def test_successful_check_proposal_has_atomic_audit_and_queue_event(
+    auth_client: tuple[TestClient, object, object]
+) -> None:
+    client, engine, token_file = auth_client
+    token = _adapter_token(client, token_file, ["propose:checks"])
+    response = client.post(
+        "/api/v1/checks",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "check_type": "platform.self_check",
+            "target": "local",
+            "parameters": {},
+            "idempotency_key": "atomic-check-proposal",
+        },
+    )
+    assert response.status_code == 201
+    task_id = UUID(response.json()["id"])
+    with Session(engine) as session:
+        events = session.exec(
+            select(OutboxEvent).where(OutboxEvent.resource_id == task_id)
+        ).all()
+        audits = session.exec(
+            select(AuditEvent).where(AuditEvent.resource_id == task_id)
+        ).all()
+        assert {event.event_type for event in events} == {"task.queued", "check.accepted"}
+        assert [audit.event_type for audit in audits] == ["check.accepted"]
+
+
+def test_check_proposal_rolls_back_task_when_observability_fails(
+    auth_client: tuple[TestClient, object, object], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, engine, token_file = auth_client
+    token = _adapter_token(client, token_file, ["propose:checks"])
+
+    def fail_append(*args: object, **kwargs: object) -> object:
+        raise RuntimeError("injected audit failure")
+
+    monkeypatch.setattr("app.api.v1.AuditService.append", fail_append)
+    with pytest.raises(RuntimeError, match="injected audit failure"):
+        client.post(
+            "/api/v1/checks",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "check_type": "platform.self_check",
+                "target": "local",
+                "parameters": {},
+                "idempotency_key": "rollback-check-proposal",
+            },
+        )
+    with Session(engine) as session:
+        assert session.exec(select(ControlTask)).all() == []
+        assert session.exec(select(OutboxEvent)).all() == []
+
+
 def test_unsupported_check_proposal_is_rejected_without_orphan_task(
     auth_client: tuple[TestClient, object, object],
 ) -> None:
@@ -175,3 +267,26 @@ def test_unsupported_check_proposal_is_rejected_without_orphan_task(
             select(AuditEvent).where(AuditEvent.event_type == "check.rejected")
         ).all()
         assert len(rejected) == 1
+
+
+@pytest.mark.parametrize(
+    ("target", "parameters"), [("payments-api", {}), ("local", {"extra": True})]
+)
+def test_platform_self_check_rejects_non_local_target_and_parameters(
+    auth_client: tuple[TestClient, object, object], target: str, parameters: dict[str, object]
+) -> None:
+    client, engine, token_file = auth_client
+    token = _adapter_token(client, token_file, ["propose:checks"])
+    response = client.post(
+        "/api/v1/checks",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "check_type": "platform.self_check",
+            "target": target,
+            "parameters": parameters,
+            "idempotency_key": f"invalid-self-check-{target}-{bool(parameters)}",
+        },
+    )
+    assert response.status_code == 403
+    with Session(engine) as session:
+        assert session.exec(select(ControlTask)).all() == []

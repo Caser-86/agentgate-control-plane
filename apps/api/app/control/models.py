@@ -16,7 +16,10 @@ class ControlTask(SQLModel, table=True):
     status: TaskStatus = Field(default=TaskStatus.QUEUED, index=True)
     payload: dict[str, object] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
     capability: str = Field(index=True)
-    idempotency_key: str = Field(unique=True, index=True)
+    idempotency_key: str = Field(index=True)
+    proposer_client_id: UUID | None = Field(
+        default=None, foreign_key="client_tokens.id", index=True
+    )
     run_id: UUID | None = Field(default=None, foreign_key="agent_runs.id", index=True)
     attempts: int = 0
     lease_version: int = 0
@@ -52,6 +55,7 @@ class WorkerExecutionGrant(SQLModel, table=True):
 
     task_id: UUID = Field(primary_key=True, foreign_key="control_tasks.id")
     worker_id: UUID = Field(foreign_key="worker_registrations.id", index=True)
+    lease_version: int = Field(index=True)
     request_digest: str = Field(index=True)
     lease_expires_at: datetime = Field(index=True)
     started_at: datetime = Field(default_factory=utc_now, index=True)

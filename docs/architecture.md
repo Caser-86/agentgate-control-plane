@@ -18,6 +18,8 @@ flowchart LR
     LLM[Mock or OpenAI-compatible LLM]
 
     Browser -->|REST + SSE| API
+    API --> Queue[Durable PostgreSQL queue]
+    Queue --> ControlWorker
     API --> Runner
     Runner --> LLM
     Runner --> Policy
@@ -114,4 +116,4 @@ sequenceDiagram
 
 ## Local-demo limitations and production path
 
-Phase 0 is deliberately local-only: Compose binds Web/API to loopback, PostgreSQL has no published host port, and no real host action exists. The API exposes health/self-check data without secrets; the scheduler recovers durable leases and the control-worker processes persisted control tasks. The native Windows Worker remains usable outside Docker for the safe `worker.self_check` protocol. Real service restarts, arbitrary shell/PowerShell, file writes and secret operations belong to later phases and are not implemented here.
+Phase 0 is deliberately local-only: Compose binds Web/API to loopback, PostgreSQL has no published host port, and no real host action exists. The API exposes health/self-check data without secrets; the scheduler recovers durable leases and the control-worker processes persisted control tasks. The native Windows Worker remains usable outside Docker for the safe `platform.self_check` protocol. Real service restarts, arbitrary shell/PowerShell, file writes and secret operations belong to later phases and are not implemented here.

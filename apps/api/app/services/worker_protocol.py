@@ -280,6 +280,7 @@ def start_worker_task(
         WorkerExecutionGrant(
             task_id=task.id,
             worker_id=worker_id,
+            lease_version=task.lease_version,
             request_digest=request_digest_value,
             lease_expires_at=task.lease_expires_at,
         )
@@ -295,12 +296,14 @@ def start_worker_task(
 
 
 def _grant_for_completion(
-    session: Session, *, task_id: UUID, worker_id: UUID, request_digest_value: str
+    session: Session, *, task_id: UUID, worker_id: UUID, lease_version: int,
+    request_digest_value: str
 ) -> WorkerExecutionGrant:
     grant = session.get(WorkerExecutionGrant, task_id)
     if (
         grant is None
         or grant.worker_id != worker_id
+        or grant.lease_version != lease_version
         or grant.request_digest != request_digest_value
     ):
         raise WorkerProtocolError(403, "execution_grant_not_owned")
@@ -324,7 +327,8 @@ def complete_worker_task(
     task = session.get(ControlTask, task_id)
     if task is not None and task.status == TaskStatus.SUCCEEDED:
         _grant_for_completion(
-            session, task_id=task_id, worker_id=worker_id, request_digest_value=request_digest_value
+            session, task_id=task_id, worker_id=worker_id,
+            lease_version=task.lease_version, request_digest_value=request_digest_value
         )
         if task.result != safe_result:
             raise WorkerProtocolError(409, "result_replay_conflict")
@@ -338,7 +342,8 @@ def complete_worker_task(
     if lease_expires_at.tzinfo is None:
         task.lease_expires_at = lease_expires_at.replace(tzinfo=UTC)
     grant = _grant_for_completion(
-        session, task_id=task_id, worker_id=worker_id, request_digest_value=request_digest_value
+        session, task_id=task_id, worker_id=worker_id,
+        lease_version=task.lease_version, request_digest_value=request_digest_value
     )
     try:
         completed = complete_task(

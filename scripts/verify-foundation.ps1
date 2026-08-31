@@ -38,6 +38,10 @@ $operatorHeaders["Cookie"] = "agentgate_session=$OperatorSessionCookie"
 if ([string]::IsNullOrWhiteSpace($WorkerCheckToken) -or [string]::IsNullOrWhiteSpace($WorkerEnrollmentToken)) {
     throw "Worker self-check requires AGENTGATE_WORKER_CHECK_TOKEN and AGENTGATE_WORKER_ENROLLMENT_TOKEN; token contents are never printed."
 }
+$readiness = Invoke-RestMethod -Headers $operatorHeaders -Uri ("http://127.0.0.1:$apiPort/api/platform/" + "self-check") -TimeoutSec 5
+if ($null -eq $readiness.migration_check -or $readiness.migration_check.status -ne "ok" -or $readiness.migration_check.code -ne "database_migration_current") {
+    throw "Database migration is missing or stale before native Worker execution."
+}
 $check = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:$apiPort/api/v1/checks" `
     -Headers @{ Authorization = "Bearer $WorkerCheckToken" } `
     -ContentType "application/json" `

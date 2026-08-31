@@ -2,13 +2,13 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 from uuid import UUID, uuid4
 
-from sqlalchemy import or_, update
+from sqlalchemy import delete, or_, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlmodel import Session, select
 
 from app.config import get_settings
 from app.control.enums import SideEffectCertainty, TaskKind, TaskOutcome, TaskStatus
-from app.control.models import ControlTask, OutboxEvent
+from app.control.models import ControlTask, OutboxEvent, WorkerExecutionGrant
 from app.models import utc_now
 
 MAX_RECOVERY_ATTEMPTS = 3
@@ -19,6 +19,7 @@ def enqueue_task(
     session: Session, *, kind: TaskKind, payload: dict[str, object], idempotency_key: str,
     capability: str, run_id: UUID | None = None,
     side_effect_certainty: SideEffectCertainty = SideEffectCertainty.READ_ONLY,
+    proposer_client_id: UUID | None = None,
 ) -> ControlTask:
     return enqueue_task_with_status(
         session,
@@ -28,6 +29,7 @@ def enqueue_task(
         capability=capability,
         run_id=run_id,
         side_effect_certainty=side_effect_certainty,
+        proposer_client_id=proposer_client_id,
     )[0]
 
 
@@ -35,45 +37,62 @@ def enqueue_task_with_status(
     session: Session, *, kind: TaskKind, payload: dict[str, object], idempotency_key: str,
     capability: str, run_id: UUID | None = None,
     side_effect_certainty: SideEffectCertainty = SideEffectCertainty.READ_ONLY,
+    proposer_client_id: UUID | None = None,
 ) -> tuple[ControlTask, bool]:
     existing = session.exec(
-        select(ControlTask).where(ControlTask.idempotency_key == idempotency_key)
+        select(ControlTask).where(
+            ControlTask.idempotency_key == idempotency_key,
+            ControlTask.proposer_client_id == proposer_client_id,
+        )
     ).first()
     if existing is not None:
         return existing, False
     if session.get_bind().dialect.name == "postgresql":
         task_id = uuid4()
         created_at = utc_now()
-        inserted_id = session.execute(
-            postgresql_insert(ControlTask)
-            .values(
-                id=task_id,
-                kind=kind.value,
-                status=TaskStatus.QUEUED.value,
-                payload=payload,
-                capability=capability,
-                idempotency_key=idempotency_key,
-                run_id=run_id,
-                attempts=0,
-                available_at=created_at,
-                created_at=created_at,
-                updated_at=created_at,
-                side_effect_certainty=side_effect_certainty.value,
+        insert = postgresql_insert(ControlTask).values(
+            id=task_id,
+            kind=kind.value,
+            status=TaskStatus.QUEUED.value,
+            payload=payload,
+            capability=capability,
+            idempotency_key=idempotency_key,
+            run_id=run_id,
+            proposer_client_id=proposer_client_id,
+            attempts=0,
+            available_at=created_at,
+            created_at=created_at,
+            updated_at=created_at,
+            side_effect_certainty=side_effect_certainty.value,
+        )
+        if proposer_client_id is None:
+            conflict = insert.on_conflict_do_nothing(
+                index_elements=["idempotency_key"],
+                index_where=cast(Any, ControlTask.proposer_client_id).is_(None),
             )
-            .on_conflict_do_nothing(index_elements=["idempotency_key"])
-            .returning(cast(Any, ControlTask.id))
+        else:
+            conflict = insert.on_conflict_do_nothing(
+                index_elements=["proposer_client_id", "idempotency_key"],
+                index_where=cast(Any, ControlTask.proposer_client_id).is_not(None),
+            )
+        inserted_id = session.execute(
+            conflict.returning(cast(Any, ControlTask.id))
         ).scalar_one_or_none()
         if inserted_id is not None:
             created = session.get(ControlTask, inserted_id)
             if created is not None:
                 return created, True
         existing = session.exec(
-            select(ControlTask).where(ControlTask.idempotency_key == idempotency_key)
+            select(ControlTask).where(
+                ControlTask.idempotency_key == idempotency_key,
+                ControlTask.proposer_client_id == proposer_client_id,
+            )
         ).one()
         return existing, False
     task = ControlTask(
         kind=kind, payload=payload, idempotency_key=idempotency_key, capability=capability,
-        run_id=run_id, side_effect_certainty=side_effect_certainty,
+        run_id=run_id, proposer_client_id=proposer_client_id,
+        side_effect_certainty=side_effect_certainty,
     )
     session.add(task)
     session.flush()
@@ -141,6 +160,13 @@ def recover_expired_task(
     )
     if cast(Any, updated).rowcount != 1:
         return False
+    session.execute(
+        delete(WorkerExecutionGrant).where(
+            cast(Any, WorkerExecutionGrant.task_id) == task_id,
+            cast(Any, WorkerExecutionGrant.worker_id) == worker_id,
+            cast(Any, WorkerExecutionGrant.lease_version) == lease_version,
+        )
+    )
     from app.repositories import AuditRepository
     from app.services.audit import AuditService
 

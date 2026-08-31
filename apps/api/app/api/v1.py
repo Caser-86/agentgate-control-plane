@@ -3,12 +3,12 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import ValidationError
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app.auth.dependencies import ClientIdentity, require_client_scope
 from app.control.enums import SideEffectCertainty, TaskKind
 from app.control.models import ControlTask
-from app.control.repositories import enqueue_task
+from app.control.repositories import append_outbox_event, enqueue_task_with_status
 from app.db import get_session
 from app.policy import PolicyEngine
 from app.repositories import AuditRepository
@@ -69,9 +69,25 @@ def propose_event(
 def propose_check(
     request: CheckProposalRequest, client: CheckClientDep, session: SessionDep
 ) -> ProposalResponse:
-    registered, _ = _validate_registered_target(
-        ToolRegistry(), request.check_type, request.target, request.parameters
-    )
+    if request.check_type == "platform.self_check":
+        if request.target != "local" or request.parameters:
+            AuditService(AuditRepository(session)).append(
+                event_type="check.rejected",
+                actor=client.actor,
+                payload={
+                    "check_type": request.check_type,
+                    "target": request.target,
+                    "reason": "self_check_requires_local_without_parameters",
+                },
+                resource_type="check_proposal",
+                resource_id=uuid4(),
+            )
+            raise _deny("invalid_self_check_target")
+        registered = ToolRegistry().get(request.check_type)
+    else:
+        registered, _ = _validate_registered_target(
+            ToolRegistry(), request.check_type, request.target, request.parameters
+        )
     if not registered.spec.read_only:
         raise _deny("check_must_be_read_only")
     if request.check_type != "platform.self_check":
@@ -88,14 +104,31 @@ def propose_check(
         )
         raise _deny("unsupported_check")
     payload: dict[str, object] = {"task_type": "platform.self_check"}
-    task = enqueue_task(
+    task, created = enqueue_task_with_status(
         session,
         kind=TaskKind.CONTROL,
         payload=payload,
         idempotency_key=request.idempotency_key,
         capability="platform.self_check",
         side_effect_certainty=SideEffectCertainty.READ_ONLY,
+        proposer_client_id=UUID(client.token_id),
     )
+    if created:
+        AuditService(AuditRepository(session)).append(
+            event_type="check.accepted",
+            actor=client.actor,
+            payload={"check_type": request.check_type, "target": request.target},
+            resource_type="control_task",
+            resource_id=task.id,
+            commit=False,
+        )
+        append_outbox_event(
+            session,
+            event_type="task.queued",
+            resource_type="control_task",
+            resource_id=task.id,
+            payload={"task_id": str(task.id), "capability": task.capability},
+        )
     session.commit()
     session.refresh(task)
     return ProposalResponse(id=task.id)
@@ -105,9 +138,15 @@ def propose_check(
 def get_check_status(
     check_id: UUID, client: CheckClientDep, session: SessionDep
 ) -> TaskStatusResponse:
-    del client
-    task = session.get(ControlTask, check_id)
-    if task is None or task.kind != TaskKind.CONTROL or task.capability != "platform.self_check":
+    task = session.exec(
+        select(ControlTask).where(
+            ControlTask.id == check_id,
+            ControlTask.kind == TaskKind.CONTROL,
+            ControlTask.capability == "platform.self_check",
+            ControlTask.proposer_client_id == UUID(client.token_id),
+        )
+    ).first()
+    if task is None:
         raise HTTPException(
             status_code=404,
             detail={"code": "not_found", "message": "check was not found"},
