@@ -11,6 +11,9 @@ from app.control.enums import SideEffectCertainty, TaskKind, TaskOutcome, TaskSt
 from app.control.models import ControlTask, OutboxEvent
 from app.models import utc_now
 
+MAX_RECOVERY_ATTEMPTS = 3
+MAX_RECOVERY_BACKOFF_SECONDS = 30
+
 
 def enqueue_task(
     session: Session, *, kind: TaskKind, payload: dict[str, object], idempotency_key: str,
@@ -65,6 +68,10 @@ def _expired_lease(task: ControlTask, now: datetime) -> bool:
     return task.lease_expires_at is not None and task.lease_expires_at <= now
 
 
+def _recovery_backoff_seconds(attempts: int) -> int:
+    return int(min(2**attempts, MAX_RECOVERY_BACKOFF_SECONDS))
+
+
 def claim_next_task(
     session: Session, *, worker_id: UUID, capabilities: set[str], now: datetime,
 ) -> ControlTask | None:
@@ -97,6 +104,17 @@ def claim_next_task(
         return None
     if _expired_lease(task, now):
         task.attempts += 1
+        task.lease_owner_id = None
+        task.lease_expires_at = None
+        task.updated_at = now
+        if task.attempts >= MAX_RECOVERY_ATTEMPTS:
+            task.status = TaskStatus.MANUAL_REVIEW
+            task.completed_at = now
+        else:
+            task.status = TaskStatus.QUEUED
+            task.available_at = now + timedelta(seconds=_recovery_backoff_seconds(task.attempts))
+        session.flush()
+        return None
     task.status = TaskStatus.LEASED
     task.lease_owner_id = worker_id
     task.lease_expires_at = now + timedelta(seconds=get_settings().worker_lease_seconds)
@@ -110,7 +128,11 @@ def renew_task_lease(
     session: Session, *, task_id: UUID, worker_id: UUID, now: datetime,
 ) -> ControlTask:
     task = session.get(ControlTask, task_id)
-    if task is None or task.lease_owner_id != worker_id or task.status not in {
+    if task is None:
+        raise ValueError("task lease is not owned by this worker")
+    if _expired_lease(task, now):
+        raise ValueError("task lease has expired")
+    if task.lease_owner_id != worker_id or task.status not in {
         TaskStatus.LEASED, TaskStatus.RUNNING
     }:
         raise ValueError("task lease is not owned by this worker")
@@ -125,7 +147,11 @@ def complete_task(
     result: dict[str, object],
 ) -> ControlTask:
     task = session.get(ControlTask, task_id)
-    if task is None or task.lease_owner_id != worker_id or task.status not in {
+    if task is None:
+        raise ValueError("task is not completable by this worker")
+    if _expired_lease(task, utc_now()):
+        raise ValueError("task lease has expired")
+    if task.lease_owner_id != worker_id or task.status not in {
         TaskStatus.LEASED, TaskStatus.RUNNING
     }:
         raise ValueError("task is not completable by this worker")
