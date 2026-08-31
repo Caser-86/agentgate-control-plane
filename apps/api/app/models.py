@@ -86,8 +86,10 @@ class AuditEvent(SQLModel, table=True):
     __tablename__ = "audit_events"
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
-    run_id: UUID = Field(foreign_key="agent_runs.id", index=True)
+    run_id: UUID | None = Field(default=None, foreign_key="agent_runs.id", index=True)
     action_id: UUID | None = Field(default=None, index=True)
+    resource_type: str | None = Field(default=None, index=True)
+    resource_id: UUID | None = Field(default=None, index=True)
     event_type: str = Field(index=True)
     actor: str
     payload_json: str

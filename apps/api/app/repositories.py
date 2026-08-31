@@ -113,9 +113,12 @@ class AuditRepository:
     def __init__(self, session: Session) -> None:
         self.session = session
 
-    def append(self, event: AuditEvent) -> AuditEvent:
+    def append(self, event: AuditEvent, *, commit: bool = True) -> AuditEvent:
         self.session.add(event)
-        self.session.commit()
+        if commit:
+            self.session.commit()
+        else:
+            self.session.flush()
         self.session.refresh(event)
         return event
 

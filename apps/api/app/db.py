@@ -10,6 +10,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
 
+import app.control.models  # noqa: F401
 from app.config import get_settings
 from app.models import ServiceState
 
