@@ -12,19 +12,21 @@ def test_registry_exposes_only_allowlisted_tools() -> None:
         "search_logs",
         "restart_service",
         "rotate_api_key",
+        "platform.self_check",
     ]
 
 
 def test_registry_emits_openai_function_schemas() -> None:
     schemas = ToolRegistry().schemas()
 
-    assert len(schemas) == 4
+    assert len(schemas) == 5
     assert all(item["type"] == "function" for item in schemas)
     assert {item["function"]["name"] for item in schemas} == {
         "get_service_health",
         "search_logs",
         "restart_service",
         "rotate_api_key",
+        "platform.self_check",
     }
 
 

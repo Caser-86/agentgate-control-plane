@@ -8,8 +8,8 @@ import { StatusBadge } from "../components/StatusBadge";
 import { useRunEvents } from "../hooks/useRunEvents";
 
 function formatArguments(value: unknown): string {
-  const secretKeys = new Set(["api_key", "apikey", "authorization", "access_token", "refresh_token", "client_secret", "private_key", "token", "secret", "password"]);
-  const normalize = (key: string): string => key.toLowerCase().replaceAll("-", "_").split(/\s+/).join("_");
+  const secretKeys = new Set(["apikey", "authorization", "accesstoken", "refreshtoken", "clientsecret", "privatekey", "token", "secret", "password", "passwordhash"]);
+  const normalize = (key: string): string => key.toLowerCase().replace(/[^a-z0-9]/g, "");
   const safe = (item: unknown): unknown => Array.isArray(item) ? item.map(safe) : item && typeof item === "object" ? Object.fromEntries(Object.entries(item).map(([key, child]) => [key, secretKeys.has(normalize(key)) ? "***REDACTED***" : safe(child)])) : item;
   return JSON.stringify(safe(value), null, 2);
 }
@@ -34,7 +34,7 @@ export function RunDetailPage() {
     <div className="page-shell detail-page">
       <Link className="back-link" to="/">← 返回运行列表</Link>
       <div className="page-heading detail-heading"><div><span className="eyebrow">运行详情 / {detail.id.slice(0, 8)}</span><h1>操作追踪</h1><p>{detail.user_request}</p></div><div className="detail-status" data-testid="run-status"><StatusBadge value={detail.status} /><span className={connection === "reconnecting" ? "reconnecting" : "live-status"}>{connection === "reconnecting" ? "正在重新连接事件" : "事件流已连接"}</span></div></div>
-      {pending && <ApprovalCard action={pending} onApprove={async () => { await api.approveAction(pending.id, { actor: "local-user" }); await load(); }} onDeny={async () => { await api.denyAction(pending.id, { actor: "local-user" }); await load(); }} onRefresh={() => void load()} />}
+      {pending && <ApprovalCard action={pending} onApprove={async () => { const updated = await api.approveAction(pending.id, {}); setDetail((current) => current ? { ...current, actions: current.actions.map((item) => item.id === updated.id ? updated : item) } : current); await load(); }} onDeny={async () => { const updated = await api.denyAction(pending.id, {}); setDetail((current) => current ? { ...current, actions: current.actions.map((item) => item.id === updated.id ? updated : item) } : current); await load(); }} onRefresh={() => void load()} />}
       <div className="detail-grid">
         <section className="panel timeline-panel"><div className="section-heading"><div><span className="eyebrow">追踪 / 按时间</span><h2>决定时间线</h2></div><span className="mono-note">{detail.audit_events.length.toString().padStart(2, "0")} 条事件</span></div><RunTimeline events={detail.audit_events} /></section>
         <aside className="panel side-panel"><div className="section-heading"><div><span className="eyebrow">运行元数据</span><h2>控制事实</h2></div></div><dl className="facts-list"><div><dt>状态</dt><dd><StatusBadge value={detail.status} /></dd></div><div><dt>Provider</dt><dd><code>{detail.provider}</code></dd></div><div><dt>模型</dt><dd><code>{detail.model}</code></dd></div><div><dt>步骤</dt><dd>{detail.step_count.toString().padStart(2, "0")}</dd></div></dl></aside>

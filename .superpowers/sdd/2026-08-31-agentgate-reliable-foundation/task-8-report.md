@@ -42,3 +42,26 @@ Existing redaction, error-path, duplicate-approval, SSE cursor, pre-grant no-han
 
 - Both E2E status helpers now reconnect and continue through transient request exceptions, empty heartbeat frames, non-advancing cursors, HTTP failures, and malformed event JSON until their own 15-second deadline. They retain the last five diagnostics and fail only after the deadline, preserving the queued → running → waiting approval → denied → audit assertions and test isolation.
 - Fresh bounded E2E attempt: `$env:AGENTGATE_E2E_PYTHON=(Resolve-Path '..\\api\\.venv\\Scripts\\python.exe').Path; $env:AGENTGATE_E2E_API_PORT='18000'; npm.cmd run test:e2e -- --reporter=list` — both isolated projects started and both tests reached the post-approval denial assertion; both then failed after 15 seconds because `[data-testid="action-status"] .status-denied` was not rendered (`2 failed`). No helper timeout or transient SSE/request failure occurred in this run. The E2E suite is therefore not claimed as passing.
+
+## Integration fix pass — 2026-09-01
+
+- Scheduler expiry recovery now uses one guarded conditional update keyed by task id, captured worker, lease version, status, and still-expired lease. Audit/Outbox side effects are emitted only when exactly one row changes; side-effect tasks go to `manual_review`, read-only tasks use bounded retry. SQLite conditional-race coverage passed; the two-session PostgreSQL race test is present but skipped because `AGENTGATE_TEST_DATABASE_URL` is unset.
+- Added the Compose `migrate` one-shot gate and `service_completed_successfully` dependencies for API, scheduler, and control-worker. `docker compose config --quiet` and structured configuration inspection passed; no Compose startup was run after the user-requested interruption.
+- Audit redaction now normalizes keys by lowercasing and removing non-alphanumeric characters across server/UI paths, with camelCase/compound-key and error-path regression coverage. Platform health/self-check are operator-authenticated; `/health` remains anonymous. The safe `platform.self_check` proposal is explicit and non-executable unless claimed by the existing safe Worker path.
+- `verify-foundation.ps1` now derives loopback host ports from structured Compose JSON and performs an authenticated native Worker self-check round trip without printing tokens. The denial UI/E2E fixes were exercised in a prior bounded run on free port `18220`: `2 passed`.
+
+### Bounded local verification after interruption
+
+- API focused pytest: `33 passed, 1 skipped in 1.21s`.
+- API Ruff: `All checks passed!`.
+- Web focused Vitest: `2 files, 6 tests passed`.
+- Web lint and typecheck: PASS.
+- PowerShell AST parse for `scripts/verify-foundation.ps1`: PASS.
+- The cleanup check found `remaining-port-connections=0`; no Docker/Postgres/E2E process was left running.
+
+### Exact unresolved limitations
+
+- PostgreSQL is not available for this pass: `AGENTGATE_TEST_DATABASE_URL` is unset, so the two-session lease-race test is skipped. No database URL was set and no persistent/user database was used.
+- Per the interruption request, no full backend suite, full frontend suite/build, Docker startup smoke, `verify-foundation.ps1` live run, or new E2E run was started after cleanup. The latest valid prior bounded E2E evidence is the free-port `18220` run (`2 passed`).
+- `verify-foundation.ps1` previously hit the host's script execution-policy block without `Bypass`, and the prior Bypass attempt failed at the exact check `API is not loopback-only`; the revised script's live authenticated/native-Worker path remains unverified because it requires a running Compose stack, session cookie, and Worker tokens.
+- Stage 0 remains evidence-limited rather than accepted as a complete environment qualification; no secrets or token contents were printed.

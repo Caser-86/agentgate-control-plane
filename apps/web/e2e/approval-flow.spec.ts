@@ -58,7 +58,7 @@ async function hasRecordedRunStatus(page: import("@playwright/test").Page, runId
   throw new Error(`timed out waiting for recorded run status ${status} for ${runId}; cursor=${cursor}; diagnostics=${diagnostics.slice(-5).join(" | ") || "none"}`);
 }
 
-test("拒绝降级服务恢复并保留可审计记录", async ({ page, browser }, testInfo) => {
+test("拒绝降级服务恢复并保留可审计记录", async ({ page }, testInfo) => {
   await login(page, testInfo.project.name);
   await expect(page.getByRole("heading", { name: "运行", exact: true })).toBeVisible();
 
@@ -89,11 +89,13 @@ test("拒绝降级服务恢复并保留可审计记录", async ({ page, browser 
   expect(waitingBody).not.toContain("api_key");
 
   await expect(approval.getByRole("button", { name: "拒绝", exact: true })).toBeVisible();
+  const denialResponse = page.waitForResponse((response) => response.url().includes("/api/approvals/") && response.url().endsWith("/deny") && response.request().method() === "POST");
   await approval.getByTestId("approval-deny").click();
+  expect((await denialResponse).status()).toBe(200);
   await expect(page.locator('[data-testid="action-status"] .status-denied')).toBeVisible({ timeout: 15_000 });
   await page.reload();
   await expect(page.getByText("approval.denied", { exact: true })).toBeVisible();
-  await expect(page.getByText('"denied": true', { exact: true })).toBeVisible();
+  await expect(page.locator(".action-row").filter({ hasText: "restart_service" }).locator("pre").last()).toContainText('"denied": true');
 
   const runId = page.url().split("/").pop();
   expect(runId).toBeTruthy();
@@ -107,8 +109,8 @@ test("拒绝降级服务恢复并保留可审计记录", async ({ page, browser 
   expect(auditBody).not.toContain("api_key");
   expect(auditBody).not.toContain("Bearer ");
 
-  const mobilePage = await browser.newPage({ viewport: { width: 390, height: 844 } });
-  await mobilePage.goto("http://127.0.0.1:5173/");
+  const mobilePage = await page.context().newPage({ viewport: { width: 390, height: 844 } });
+  await mobilePage.goto(new URL("/", page.url()).toString());
   await expect(mobilePage.getByRole("heading", { name: "运行", exact: true })).toBeVisible();
   const dimensions = await mobilePage.evaluate(() => ({
     clientWidth: document.documentElement.clientWidth,

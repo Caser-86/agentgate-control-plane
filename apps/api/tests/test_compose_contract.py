@@ -5,8 +5,23 @@ COMPOSE = (REPO_ROOT / "compose.yaml").read_text(encoding="utf-8")
 
 
 def test_compose_contains_the_complete_local_topology() -> None:
-    for service in ("postgres:", "api:", "scheduler:", "control-worker:", "web:"):
+    for service in ("postgres:", "migrate:", "api:", "scheduler:", "control-worker:", "web:"):
         assert f"  {service}" in COMPOSE
+
+
+def test_runtime_services_wait_for_successful_one_shot_migration() -> None:
+    assert "migrate:" in COMPOSE
+    assert "upgrade_to_head" in COMPOSE
+    for service in ("api:", "scheduler:", "control-worker:"):
+        lines = COMPOSE.split(f"  {service}", 1)[1].splitlines()[1:]
+        block_lines = []
+        for line in lines:
+            if line.startswith("  ") and not line.startswith("    "):
+                break
+            block_lines.append(line)
+        block = "\n".join(block_lines)
+        assert "migrate:" in block
+        assert "service_completed_successfully" in block
 
 
 def test_postgres_has_no_published_host_port() -> None:

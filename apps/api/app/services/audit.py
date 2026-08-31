@@ -1,4 +1,5 @@
 import json
+import re
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
@@ -10,23 +11,15 @@ from app.repositories import AuditRepository
 
 REDACTED = "***REDACTED***"
 SENSITIVE_KEYS = {
-    "api_key",
-    "apikey",
-    "authorization",
-    "access_token",
-    "refresh_token",
-    "client_secret",
-    "private_key",
-    "token",
-    "secret",
-    "password",
+    "apikey", "authorization", "accesstoken", "refreshtoken", "clientsecret",
+    "privatekey", "token", "secret", "password", "passwordhash",
 }
 
 
 def is_sensitive_key(key: object) -> bool:
     if not isinstance(key, str):
         return False
-    normalized = "_".join(key.lower().replace("-", "_").split())
+    normalized = re.sub(r"[^a-z0-9]", "", key.lower())
     return normalized in SENSITIVE_KEYS
 
 

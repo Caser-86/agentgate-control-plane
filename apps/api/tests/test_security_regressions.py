@@ -129,6 +129,34 @@ def test_secret_like_keys_are_redacted_at_audit_and_api_boundaries() -> None:
         assert action_response.arguments["client_secret"] == "***REDACTED***"
 
 
+def test_secret_key_redaction_normalizes_camel_case_and_compound_keys() -> None:
+    fake_secret = "fake-compound-secret"
+    from app.services.audit import redact
+
+    value = redact(
+        {
+            "clientSecret": fake_secret,
+            "accessToken": fake_secret,
+            "passwordHash": fake_secret,
+            "api-key": fake_secret,
+            "api_key": fake_secret,
+            "authorization": fake_secret,
+            "token": fake_secret,
+            "secret": fake_secret,
+        }
+    )
+    assert value == {
+        "clientSecret": "***REDACTED***",
+        "accessToken": "***REDACTED***",
+        "passwordHash": "***REDACTED***",
+        "api-key": "***REDACTED***",
+        "api_key": "***REDACTED***",
+        "authorization": "***REDACTED***",
+        "token": "***REDACTED***",
+        "secret": "***REDACTED***",
+    }
+
+
 def test_expired_worker_approval_cannot_start_and_creates_no_execution_grant() -> None:
     engine = _new_engine()
     worker_id = uuid4()

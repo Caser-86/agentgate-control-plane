@@ -1,8 +1,10 @@
 from collections.abc import Generator
+from uuid import UUID
 
 from fastapi.testclient import TestClient
 from sqlmodel import Session
 
+from app.control.models import ControlTask
 from app.db import create_db_and_tables, create_db_engine, get_session
 from app.main import app
 
@@ -96,3 +98,26 @@ def test_scope_denial_precedes_action_proposal(
 
     assert response.status_code == 403
     assert response.json()["error"]["code"] == "insufficient_scope"
+
+
+def test_platform_self_check_proposal_creates_native_worker_safe_payload(
+    auth_client: tuple[TestClient, object, object]
+) -> None:
+    client, engine, token_file = auth_client
+    token = _adapter_token(client, token_file, ["propose:checks"])
+    response = client.post(
+        "/api/v1/checks",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "check_type": "platform.self_check",
+            "target": "local",
+            "parameters": {},
+            "idempotency_key": "native-self-check-contract",
+        },
+    )
+    assert response.status_code == 201
+    with Session(engine) as session:
+        task = session.get(ControlTask, UUID(response.json()["id"]))
+        assert task is not None
+        assert task.payload == {"task_type": "platform.self_check"}
+        assert task.capability == "platform.self_check"

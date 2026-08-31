@@ -1,4 +1,4 @@
-from typing import Annotated
+from typing import Annotated, cast
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -72,17 +72,25 @@ def propose_check(
     )
     if not registered.spec.read_only:
         raise _deny("check_must_be_read_only")
-    task = enqueue_task(
-        session,
-        kind=TaskKind.CONTROL,
-        payload={
+    payload: dict[str, object] = (
+        {"task_type": "platform.self_check"}
+        if request.check_type == "platform.self_check"
+        else cast(dict[str, object], {
             "check_type": request.check_type,
             "target": request.target,
             "parameters": normalized,
             "actor": client.actor,
-        },
+        })
+    )
+    capability = (
+        "platform.self_check" if request.check_type == "platform.self_check" else "check"
+    )
+    task = enqueue_task(
+        session,
+        kind=TaskKind.CONTROL,
+        payload=payload,
         idempotency_key=request.idempotency_key,
-        capability="check",
+        capability=capability,
         side_effect_certainty=SideEffectCertainty.READ_ONLY,
     )
     session.commit()

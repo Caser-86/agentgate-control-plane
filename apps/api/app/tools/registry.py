@@ -26,6 +26,10 @@ class RegisteredTool:
     handler: ToolHandler | None
 
 
+class SelfCheckArgs(BaseModel):
+    pass
+
+
 class UnknownToolError(LookupError):
     pass
 
@@ -87,6 +91,17 @@ class ToolRegistry:
                     read_only=False,
                 ),
                 ServiceArgs,
+                None,
+            ),
+            "platform.self_check": RegisteredTool(
+                ToolSpec(
+                    name="platform.self_check",
+                    description="Read-only native Worker protocol self-check.",
+                    parameters_schema=SelfCheckArgs.model_json_schema(),
+                    risk_level=RiskLevel.LOW,
+                    read_only=True,
+                ),
+                SelfCheckArgs,
                 None,
             ),
         }

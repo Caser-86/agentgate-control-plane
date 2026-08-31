@@ -78,11 +78,13 @@ test("中文首次登录、排队审批拒绝并在刷新后保留审计游标",
   const approval = page.getByTestId("approval-card");
   await expect(page.locator('[data-testid="action-status"] .status-pending-approval')).toBeVisible();
   await expect(approval.getByRole("button", { name: "拒绝", exact: true })).toBeVisible();
+  const denialResponse = page.waitForResponse((response) => response.url().includes("/api/approvals/") && response.url().endsWith("/deny") && response.request().method() === "POST");
   await approval.getByTestId("approval-deny").click();
+  expect((await denialResponse).status()).toBe(200);
   await expect(page.locator('[data-testid="action-status"] .status-denied')).toBeVisible({ timeout: 15_000 });
   await page.reload();
   await expect(page.getByText("approval.denied", { exact: true })).toBeVisible();
-  await expect(page.getByText('"denied": true', { exact: true })).toBeVisible();
+  await expect(page.locator(".action-row").filter({ hasText: "restart_service" }).locator("pre").last()).toContainText('"denied": true');
   expect(await page.locator("body").innerText()).not.toContain("api_key");
 
   const runId = page.url().split("/").pop();

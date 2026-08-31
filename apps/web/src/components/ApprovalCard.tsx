@@ -9,7 +9,7 @@ const secretKeys = new Set([
 ]);
 
 function normalizedKey(key: string): string {
-  return key.toLowerCase().replaceAll("-", "_").split(/\s+/).join("_");
+  return key.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
 function safeValue(value: unknown): unknown {

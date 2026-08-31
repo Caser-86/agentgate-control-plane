@@ -75,4 +75,28 @@ describe("ApprovalCard", () => {
     expect(await screen.findByText("无法保存审批决定")).toBeInTheDocument();
     expect(screen.queryByText("fake-secret")).not.toBeInTheDocument();
   });
+
+  it("redacts camelCase and compound sensitive keys in the approval payload", () => {
+    render(
+      <ApprovalCard
+        action={{
+          ...action,
+          arguments: {
+            clientSecret: "fake-client-secret",
+            accessToken: "fake-access-token",
+            passwordHash: "fake-password-hash",
+            "api-key": "fake-api-key",
+          },
+        }}
+        onApprove={vi.fn()}
+        onDeny={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(/clientSecret/)).toBeInTheDocument();
+    expect(screen.queryByText("fake-client-secret")).not.toBeInTheDocument();
+    expect(screen.queryByText("fake-access-token")).not.toBeInTheDocument();
+    expect(screen.queryByText("fake-password-hash")).not.toBeInTheDocument();
+    expect(screen.queryByText("fake-api-key")).not.toBeInTheDocument();
+  });
 });

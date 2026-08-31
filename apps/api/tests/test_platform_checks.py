@@ -4,6 +4,14 @@ from sqlalchemy import text
 from tests.conftest import authenticate_client
 
 
+def test_platform_endpoints_require_operator_session(
+    auth_client: tuple[TestClient, object, object]
+) -> None:
+    client, _, _ = auth_client
+    assert client.get("/api/platform/health").status_code == 401
+    assert client.get("/api/platform/self-check").status_code == 401
+
+
 def test_platform_health_distinguishes_worker_and_target_health(
     auth_client: tuple[TestClient, object, object]
 ) -> None:
