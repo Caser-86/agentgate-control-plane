@@ -93,8 +93,8 @@ class ToolExecutor:
                 result = await registered.handler(arguments, self.session)
         except TimeoutError:
             return await self._fail(action_id, "tool execution timed out")
-        except (ValidationError, UnknownToolError, ExecutionError, ValueError) as exc:
-            return await self._fail(action_id, str(exc))
+        except (ValidationError, UnknownToolError, ExecutionError, ValueError):
+            return await self._deny(action_id, "tool execution was denied safely")
         except Exception:
             return await self._fail(action_id, "tool execution failed safely")
 
@@ -142,6 +142,27 @@ class ToolExecutor:
             "tool.failed",
             "tool",
             {"tool_name": action.tool_name, "error": message},
+            action.id,
+            commit=False,
+        )
+        self.session.commit()
+        self.session.refresh(action)
+        return action
+
+    async def _deny(self, action_id: UUID, message: str) -> ToolAction:
+        action = self.action_repository.get(action_id)
+        if action is None:
+            raise ActionNotFoundError("tool action disappeared while denying execution")
+        action.status = ActionStatus.DENIED
+        action.result_json = json.dumps({"denied": True, "reason": message}, ensure_ascii=False)
+        action.executed_at = datetime.now(UTC)
+        self.session.add(action)
+        self._emit(action)
+        self.audit.append(
+            action.run_id,
+            "tool.denied",
+            "tool",
+            {"tool_name": action.tool_name, "reason": message},
             action.id,
             commit=False,
         )

@@ -33,6 +33,18 @@ services:
       interval: 5s
       timeout: 3s
       retries: 12
+  control-worker:
+    build: ./apps/api
+    command: ["python", "-m", "app.processes.control_worker"]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      AGENTGATE_LLM_PROVIDER: ${AGENTGATE_LLM_PROVIDER:-mock}
+      AGENTGATE_DATABASE_URL: postgresql+psycopg://agentgate:${AGENTGATE_POSTGRES_PASSWORD:-agentgate}@postgres:5432/agentgate
+    depends_on:
+      postgres:
+        condition: service_healthy
   web:
     build:
       context: ./apps/web

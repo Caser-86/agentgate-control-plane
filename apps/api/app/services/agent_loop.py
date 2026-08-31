@@ -104,6 +104,12 @@ class AgentRunner:
                 self.session.commit()
         messages = run.messages()
 
+        if await self._resume_approved_action(run_id, messages):
+            run = self.run_repository.get(run_id)
+            if run is None:
+                return
+            messages = run.messages()
+
         while True:
             run = self.run_repository.get(run_id)
             if run is None:
@@ -146,6 +152,40 @@ class AgentRunner:
                     self.run_repository.save_checkpoint(run_id, messages, step_count)
                 if pending:
                     return
+
+    async def _resume_approved_action(
+        self, run_id: UUID, messages: list[dict[str, object]]
+    ) -> bool:
+        """Execute an already-approved action exactly once from the worker path."""
+        approved = next(
+            (
+                action
+                for action in self.action_repository.list_for_run(run_id)
+                if action.status is ActionStatus.APPROVED
+            ),
+            None,
+        )
+        if approved is None:
+            return False
+        executed = await self.executor.execute(approved.id)
+        messages.append(
+            {
+                "role": "tool",
+                "tool_call_id": executed.tool_call_id,
+                "name": executed.tool_name,
+                "content": executed.result_json or '{"error":"tool returned no result"}',
+            }
+        )
+        run = self.run_repository.get(run_id)
+        if run is not None:
+            self.run_repository.save_checkpoint(run_id, messages, run.step_count, commit=False)
+            self._emit(
+                run_id,
+                "action.updated",
+                {"action_id": str(executed.id), "status": executed.status.value},
+            )
+            self.session.commit()
+        return True
 
     async def _handle_tool_call(
         self,

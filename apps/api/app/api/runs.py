@@ -4,13 +4,14 @@ from collections.abc import AsyncIterator
 from typing import Annotated, cast
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlmodel import Session
 
 from app.auth.dependencies import require_csrf, require_operator
 from app.auth.models import Operator
 from app.config import get_settings
+from app.control.models import ControlTask
 from app.db import get_session
 from app.models import AgentRun, AuditEvent, ToolAction
 from app.repositories import ActionRepository, AuditRepository, RunRepository
@@ -19,6 +20,7 @@ from app.schemas import (
     AuditEventResponse,
     CreateRunRequest,
     RunDetailResponse,
+    TaskStatusResponse,
     ToolActionResponse,
 )
 from app.services.audit import redact
@@ -88,12 +90,11 @@ def _final_text(run: AgentRun) -> str | None:
 @router.post("", response_model=AgentRunResponse, status_code=202)
 def create_run(
     request: CreateRunRequest,
-    background_tasks: BackgroundTasks,
     session: SessionDep,
-    _: CsrfOperatorDep,
+    operator: CsrfOperatorDep,
 ) -> AgentRunResponse:
     try:
-        run = RunService(session, get_settings()).create(request.user_request, background_tasks)
+        run = RunService(session, get_settings()).create(request.user_request, operator)
     except RuntimeError as exc:
         logger.warning("run_provider_creation_failed", exc_info=False)
         raise HTTPException(
@@ -101,6 +102,19 @@ def create_run(
             detail={"code": "provider_error", "message": "Provider unavailable"},
         ) from exc
     return to_run_response(run)
+
+
+def to_task_response(task: ControlTask) -> TaskStatusResponse:
+    return TaskStatusResponse(
+        id=task.id,
+        kind=task.kind.value,
+        status=task.status.value,
+        attempts=task.attempts,
+        run_id=task.run_id,
+        available_at=task.available_at,
+        lease_expires_at=task.lease_expires_at,
+        result=redact(task.result),
+    )
 
 
 @router.get("", response_model=list[AgentRunResponse])
@@ -124,6 +138,19 @@ def get_run(run_id: UUID, session: SessionDep, _: OperatorDep) -> RunDetailRespo
         audit_events=[to_audit_response(event) for event in AuditRepository(session).list(run_id)],
         final_text=_final_text(run),
     )
+
+
+@router.get("/{run_id}/tasks", response_model=list[TaskStatusResponse])
+def list_run_tasks(run_id: UUID, session: SessionDep, _: OperatorDep) -> list[TaskStatusResponse]:
+    if RunRepository(session).get(run_id) is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "not_found", "message": "run was not found"},
+        )
+    from sqlmodel import select
+
+    tasks = list(session.exec(select(ControlTask).where(ControlTask.run_id == run_id)).all())
+    return [to_task_response(task) for task in tasks]
 
 
 def stream_run_events(

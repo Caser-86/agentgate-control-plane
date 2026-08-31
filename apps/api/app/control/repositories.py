@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 from uuid import UUID, uuid4
 
@@ -65,7 +65,14 @@ def enqueue_task(
 
 
 def _expired_lease(task: ControlTask, now: datetime) -> bool:
-    return task.lease_expires_at is not None and task.lease_expires_at <= now
+    if task.lease_expires_at is None:
+        return False
+    expiry = task.lease_expires_at
+    if expiry.tzinfo is None:
+        expiry = expiry.replace(tzinfo=UTC)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=UTC)
+    return expiry <= now
 
 
 def _recovery_backoff_seconds(attempts: int) -> int:

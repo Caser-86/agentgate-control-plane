@@ -18,6 +18,7 @@ from app.evals.graders import (
 )
 from app.llm.mock import MockLLMProvider
 from app.models import RunStatus, ServiceState
+from app.processes.control_worker import ControlWorker
 from app.repositories import ActionRepository, AuditRepository, RunRepository
 from app.services.agent_loop import AgentRunner
 from app.services.approvals import ApprovalService
@@ -86,11 +87,13 @@ async def run_case(case: EvalCase) -> CaseEvaluation:
                     raise RuntimeError(
                         f"eval case {case.name} expected one pending approval, got {len(pending)}"
                     )
-                approval_service = ApprovalService(session, runner=runner)
+                approval_service = ApprovalService(session)
                 if case.approval == "approve":
                     await approval_service.approve(pending[0].id, "eval-runner")
                 else:
                     await approval_service.deny(pending[0].id, "eval-runner")
+                await asyncio.to_thread(ControlWorker(engine).run_once)
+                session.expire_all()
 
         final_run = RunRepository(session).get(run_id)
         if final_run is None:

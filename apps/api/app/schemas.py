@@ -120,6 +120,17 @@ class RunDetailResponse(AgentRunResponse):
     final_text: str | None
 
 
+class TaskStatusResponse(BaseModel):
+    id: UUID
+    kind: str
+    status: str
+    attempts: int
+    run_id: UUID | None
+    available_at: datetime
+    lease_expires_at: datetime | None
+    result: object | None
+
+
 class PolicyView(BaseModel):
     name: str
     description: str

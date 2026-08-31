@@ -8,40 +8,46 @@ from sqlmodel import Session
 from app.api.runs import to_action_response
 from app.db import seed_demo_state
 from app.models import ActionStatus, PolicyDecision, RiskLevel, ToolAction
+from app.processes.control_worker import ControlWorker
 from app.services.runs import RunService
 from tests.conftest import authenticate_client
 
 
 @pytest.fixture
-def api_client(auth_client: tuple[TestClient, object, object]) -> TestClient:
+def api_client(auth_client: tuple[TestClient, object, object]) -> tuple[TestClient, object]:
     client, engine, token_file = auth_client
     with Session(engine) as session:
         seed_demo_state(session)
     authenticate_client(client, token_file)
-    return client
+    return client, engine
 
 
-def test_runs_api_contract(api_client: TestClient) -> None:
-    created = api_client.post("/api/runs", json={"user_request": "Inspect payments-api"})
+def test_runs_api_contract(api_client: tuple[TestClient, object]) -> None:
+    client, _ = api_client
+    created = client.post("/api/runs", json={"user_request": "Inspect payments-api"})
     assert created.status_code == 202
     run_id = created.json()["id"]
 
-    assert api_client.get("/api/runs").status_code == 200
-    assert api_client.get(f"/api/runs/{run_id}").status_code == 200
-    assert api_client.get(f"/api/runs/{uuid4()}").json()["error"]["code"] == "not_found"
-    assert api_client.get(f"/api/runs/{uuid4()}").status_code == 404
+    assert client.get("/api/runs").status_code == 200
+    assert client.get(f"/api/runs/{run_id}").status_code == 200
+    assert client.get(f"/api/runs/{uuid4()}").json()["error"]["code"] == "not_found"
+    assert client.get(f"/api/runs/{uuid4()}").status_code == 404
 
 
-def test_approval_api_returns_conflict_and_not_found(api_client: TestClient) -> None:
-    response = api_client.post(f"/api/approvals/{uuid4()}/approve", json={})
+def test_approval_api_returns_conflict_and_not_found(api_client: tuple[TestClient, object]) -> None:
+    client, _ = api_client
+    response = client.post(f"/api/approvals/{uuid4()}/approve", json={})
 
     assert response.status_code == 404
     assert set(response.json()) == {"error"}
     assert set(response.json()["error"]) == {"code", "message"}
 
 
-def test_pending_approval_can_be_approved_and_duplicate_conflicts(api_client: TestClient) -> None:
-    created = api_client.post(
+def test_pending_approval_can_be_approved_and_duplicate_conflicts(
+    api_client: tuple[TestClient, object],
+) -> None:
+    client, engine = api_client
+    created = client.post(
         "/api/runs",
         json={
             "user_request": (
@@ -50,30 +56,32 @@ def test_pending_approval_can_be_approved_and_duplicate_conflicts(api_client: Te
         },
     )
     run_id = created.json()["id"]
-    detail = api_client.get(f"/api/runs/{run_id}").json()
+    assert ControlWorker(engine).run_once() == 1
+    detail = client.get(f"/api/runs/{run_id}").json()
     action = next(item for item in detail["actions"] if item["status"] == "pending_approval")
 
-    approved = api_client.post(
+    approved = client.post(
         f"/api/approvals/{action['id']}/approve",
         json={"note": "Reviewed the impact."},
     )
-    duplicate = api_client.post(f"/api/approvals/{action['id']}/approve", json={})
+    duplicate = client.post(f"/api/approvals/{action['id']}/approve", json={})
 
     assert approved.status_code == 200
-    assert approved.json()["status"] == "succeeded"
+    assert approved.json()["status"] == "approved"
     assert duplicate.status_code == 409
     assert duplicate.json()["error"]["code"] == "approval_conflict"
 
 
-def test_api_validation_uses_unified_error_shape(api_client: TestClient) -> None:
-    response = api_client.post("/api/runs", json={"user_request": "bad"})
+def test_api_validation_uses_unified_error_shape(api_client: tuple[TestClient, object]) -> None:
+    client, _ = api_client
+    response = client.post("/api/runs", json={"user_request": "bad"})
 
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "validation_error"
 
 
 def test_provider_error_does_not_return_the_provider_exception(
-    api_client: TestClient, monkeypatch: pytest.MonkeyPatch
+    api_client: tuple[TestClient, object], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def fail_create(
         _: RunService, __: str, ___: object
@@ -82,7 +90,8 @@ def test_provider_error_does_not_return_the_provider_exception(
 
     monkeypatch.setattr(RunService, "create", fail_create)
 
-    response = api_client.post("/api/runs", json={"user_request": "Inspect payments-api"})
+    client, _ = api_client
+    response = client.post("/api/runs", json={"user_request": "Inspect payments-api"})
 
     assert response.status_code == 503
     assert response.json() == {
@@ -91,7 +100,7 @@ def test_provider_error_does_not_return_the_provider_exception(
     assert "provider-exception-placeholder" not in response.text
 
 
-def test_run_detail_redacts_sensitive_action_fields(api_client: TestClient) -> None:
+def test_run_detail_redacts_sensitive_action_fields(api_client: tuple[TestClient, object]) -> None:
     action = ToolAction(
         run_id=uuid4(),
         tool_call_id="call-redact",

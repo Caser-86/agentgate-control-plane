@@ -20,19 +20,22 @@ SessionDep = Annotated[Session, Depends(get_session)]
 OperatorDep = Annotated[Operator, Depends(require_csrf)]
 
 
-async def _decide(
+def _decide(
     action_id: UUID,
     request: ApprovalRequest,
     session: Session,
     approved: bool,
-    actor: str,
+    operator: Operator,
 ) -> ToolActionResponse:
     service = ApprovalService(session)
     try:
-        action = (
-            await service.approve(action_id, actor, request.note)
-            if approved
-            else await service.deny(action_id, actor, request.note)
+        from app.services.approvals import ApprovalDecision
+
+        action = service.decide(
+            action_id,
+            ApprovalDecision.APPROVED if approved else ApprovalDecision.DENIED,
+            operator,
+            request.note,
         )
     except ApprovalNotFoundError as exc:
         raise HTTPException(
@@ -48,20 +51,20 @@ async def _decide(
 
 
 @router.post("/{action_id}/approve", response_model=ToolActionResponse)
-async def approve_action(
+def approve_action(
     action_id: UUID,
     request: ApprovalRequest,
     session: SessionDep,
     operator: OperatorDep,
 ) -> ToolActionResponse:
-    return await _decide(action_id, request, session, True, f"operator:{operator.id}")
+    return _decide(action_id, request, session, True, operator)
 
 
 @router.post("/{action_id}/deny", response_model=ToolActionResponse)
-async def deny_action(
+def deny_action(
     action_id: UUID,
     request: ApprovalRequest,
     session: SessionDep,
     operator: OperatorDep,
 ) -> ToolActionResponse:
-    return await _decide(action_id, request, session, False, f"operator:{operator.id}")
+    return _decide(action_id, request, session, False, operator)
