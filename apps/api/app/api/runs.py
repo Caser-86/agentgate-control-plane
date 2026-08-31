@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 from collections.abc import AsyncIterator
 from typing import Annotated, cast
 from uuid import UUID
@@ -26,6 +27,7 @@ from app.services.events import EventBroker, RunEvent, event_broker, event_to_ss
 from app.services.runs import RunService
 
 router = APIRouter(prefix="/api/runs", tags=["runs"])
+logger = logging.getLogger(__name__)
 SessionDep = Annotated[Session, Depends(get_session)]
 OperatorDep = Annotated[Operator, Depends(require_operator)]
 CsrfOperatorDep = Annotated[Operator, Depends(require_csrf)]
@@ -102,9 +104,10 @@ def create_run(
     try:
         run = RunService(session, get_settings()).create(request.user_request, background_tasks)
     except RuntimeError as exc:
+        logger.warning("run_provider_creation_failed", exc_info=False)
         raise HTTPException(
             status_code=503,
-            detail={"code": "provider_error", "message": str(exc)},
+            detail={"code": "provider_error", "message": "Provider unavailable"},
         ) from exc
     return to_run_response(run)
 

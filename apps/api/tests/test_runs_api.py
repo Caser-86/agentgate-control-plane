@@ -8,6 +8,7 @@ from sqlmodel import Session
 from app.api.runs import to_action_response
 from app.db import seed_demo_state
 from app.models import ActionStatus, PolicyDecision, RiskLevel, ToolAction
+from app.services.runs import RunService
 from tests.conftest import authenticate_client
 
 
@@ -69,6 +70,25 @@ def test_api_validation_uses_unified_error_shape(api_client: TestClient) -> None
 
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "validation_error"
+
+
+def test_provider_error_does_not_return_the_provider_exception(
+    api_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fail_create(
+        _: RunService, __: str, ___: object
+    ) -> object:
+        raise RuntimeError("provider-exception-placeholder")
+
+    monkeypatch.setattr(RunService, "create", fail_create)
+
+    response = api_client.post("/api/runs", json={"user_request": "Inspect payments-api"})
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "error": {"code": "provider_error", "message": "Provider unavailable"}
+    }
+    assert "provider-exception-placeholder" not in response.text
 
 
 def test_run_detail_redacts_sensitive_action_fields(api_client: TestClient) -> None:

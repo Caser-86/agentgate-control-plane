@@ -1,12 +1,15 @@
 import hashlib
 import hmac
+import os
 import secrets
-from datetime import UTC, timedelta
+import tempfile
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.auth.models import BootstrapToken, Operator, WebSession
@@ -43,24 +46,58 @@ def ensure_bootstrap_token(session: Session, settings: Settings) -> None:
     if session.exec(select(Operator)).first() is not None:
         return
     now = utc_now()
-    active = session.exec(
-        select(BootstrapToken).where(
-            cast(Any, BootstrapToken.consumed_at).is_(None), BootstrapToken.expires_at > now
-        )
-    ).first()
-    if active is not None:
-        return
     token = new_secret()
-    session.add(
-        BootstrapToken(
-            token_digest=digest_secret(token),
-            expires_at=now + timedelta(seconds=settings.auth_bootstrap_ttl_seconds),
+    bootstrap = session.exec(
+        select(BootstrapToken)
+        .where(BootstrapToken.issuance_key == "bootstrap")
+        .with_for_update()
+    ).first()
+    if bootstrap is not None:
+        is_active = (
+            bootstrap.consumed_at is None
+            and _as_utc(bootstrap.expires_at) > now
         )
-    )
-    session.commit()
-    target = bootstrap_file(settings)
+        if is_active:
+            return
+        bootstrap.token_digest = digest_secret(token)
+        bootstrap.expires_at = now + timedelta(seconds=settings.auth_bootstrap_ttl_seconds)
+        bootstrap.consumed_at = None
+        session.add(bootstrap)
+        session.commit()
+    else:
+        session.add(
+            BootstrapToken(
+                issuance_key="bootstrap",
+                token_digest=digest_secret(token),
+                expires_at=now + timedelta(seconds=settings.auth_bootstrap_ttl_seconds),
+            )
+        )
+        try:
+            session.commit()
+        except IntegrityError:
+            session.rollback()
+            return
+    _publish_bootstrap_token(bootstrap_file(settings), token)
+
+
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value
+
+
+def _publish_bootstrap_token(target: Path, token: str) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(token, encoding="utf-8")
+    descriptor, temporary_name = tempfile.mkstemp(prefix=".bootstrap-", dir=target.parent)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as temporary:
+            temporary.write(token)
+            temporary.flush()
+            os.fsync(temporary.fileno())
+        os.replace(temporary_name, target)
+    except BaseException:
+        Path(temporary_name).unlink(missing_ok=True)
+        raise
 
 
 def consume_bootstrap_token(session: Session, token: str) -> BootstrapToken | None:

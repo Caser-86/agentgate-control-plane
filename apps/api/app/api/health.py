@@ -11,7 +11,7 @@ OperatorDep = Annotated[Operator, Depends(require_operator)]
 
 
 @router.get("/health")
-def health() -> dict[str, str]:
+def health(_: OperatorDep) -> dict[str, str]:
     return {"status": "ok", "service": "agentgate-api"}
 
 

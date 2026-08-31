@@ -28,3 +28,18 @@ The first frontend focused test run failed because the brief-required `AuthProvi
 
 - No Worker runtime, SSE protocol work, controls, filesystem, scripts, or shell execution was added.
 - Existing historical migration files contain independent style debt when linting the entire repository root; Task 3 validation uses the application and test targets required for this change, both clean.
+
+## Fix report — review round 1
+
+### Root causes and corrections
+
+- `/health` omitted the existing operator dependency, so anonymous requests received a successful response. The endpoint now requires `require_operator`; tests cover both anonymous rejection and authenticated success.
+- Bootstrap issuance read for an active row and inserted later without a serializing database key. `BootstrapToken` now has a unique `issuance_key`, migration `0004_bootstrap_issuance_key` adds its unique index, and issuance updates or inserts the single key under row locking. A competing insert rolls back and never publishes a file. Token-file publication writes and fsyncs a temporary file before atomic replacement; active issuance returns without touching the existing file.
+- Run creation returned `str(RuntimeError)` in the provider-error envelope. It now logs only a fixed event name and returns the stable `provider_error` / `Provider unavailable` response. The regression test proves the exception text is absent from the response.
+
+### Fix verification
+
+- `python -m pytest tests/test_auth_api.py tests/test_auth_dependencies.py tests/test_v1_api.py tests/test_health.py tests/test_runs_api.py -q`: `25 passed`.
+- `python -m pytest -q`: `90 passed, 3 skipped`.
+- `python -m ruff check app tests`: passed.
+- `python -m mypy app`: passed.

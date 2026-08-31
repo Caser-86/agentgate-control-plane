@@ -43,6 +43,7 @@ class BootstrapToken(SQLModel, table=True):
     __tablename__ = "bootstrap_tokens"
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
+    issuance_key: str = Field(default="bootstrap", unique=True, index=True)
     token_digest: str = Field(unique=True, index=True)
     expires_at: datetime = Field(index=True)
     consumed_at: datetime | None = Field(default=None, index=True)

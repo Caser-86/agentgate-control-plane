@@ -3,7 +3,9 @@ from datetime import timedelta
 from pathlib import Path
 from uuid import UUID
 
+import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.auth.models import BootstrapToken, ClientToken, Operator
@@ -106,6 +108,23 @@ def test_setup_rejects_a_reused_bootstrap_token(
 
     assert reused.status_code == 409
     assert reused.json()["error"]["code"] == "setup_already_completed"
+
+
+def test_bootstrap_issuance_slot_is_unique_in_the_database(
+    auth_client: tuple[TestClient, object, Path]
+) -> None:
+    _, engine, _ = auth_client
+    with Session(engine) as session:
+        original = session.exec(select(BootstrapToken)).one()
+        session.add(
+            BootstrapToken(
+                token_digest="digest-placeholder-second",
+                expires_at=original.expires_at,
+                issuance_key="bootstrap",
+            )
+        )
+        with pytest.raises(IntegrityError):
+            session.commit()
 
 
 def test_state_change_without_csrf_is_rejected(
