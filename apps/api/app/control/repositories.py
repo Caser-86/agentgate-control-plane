@@ -133,21 +133,24 @@ def claim_next_task(
 
 
 def renew_task_lease(
-    session: Session, *, task_id: UUID, worker_id: UUID, now: datetime,
-) -> ControlTask:
-    task = session.get(ControlTask, task_id)
-    if task is None:
-        raise ValueError("task lease is not owned by this worker")
-    if _expired_lease(task, now):
-        raise ValueError("task lease has expired")
-    if task.lease_owner_id != worker_id or task.status not in {
-        TaskStatus.LEASED, TaskStatus.RUNNING
-    }:
-        raise ValueError("task lease is not owned by this worker")
-    task.lease_expires_at = now + timedelta(seconds=get_settings().worker_lease_seconds)
-    task.updated_at = now
-    session.flush()
-    return task
+    session: Session, *, task_id: UUID, worker_id: UUID, lease_version: int, now: datetime,
+) -> bool:
+    updated = session.execute(
+        update(ControlTask)
+        .where(
+            cast(Any, ControlTask.id) == task_id,
+            cast(Any, ControlTask.lease_owner_id) == worker_id,
+            cast(Any, ControlTask.lease_version) == lease_version,
+            cast(Any, ControlTask.status).in_([TaskStatus.LEASED, TaskStatus.RUNNING]),
+            cast(Any, ControlTask.lease_expires_at) > now,
+        )
+        .values(
+            lease_expires_at=now + timedelta(seconds=get_settings().worker_lease_seconds),
+            updated_at=now,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    return bool(cast(Any, updated).rowcount == 1)
 
 
 def start_task(
@@ -170,26 +173,34 @@ def start_task(
 
 def complete_task(
     session: Session, *, task_id: UUID, worker_id: UUID, outcome: TaskOutcome,
-    result: dict[str, object], lease_version: int | None = None,
+    result: dict[str, object], lease_version: int,
 ) -> ControlTask:
+    completed_at = utc_now()
+    updated = session.execute(
+        update(ControlTask)
+        .where(
+            cast(Any, ControlTask.id) == task_id,
+            cast(Any, ControlTask.lease_owner_id) == worker_id,
+            cast(Any, ControlTask.lease_version) == lease_version,
+            cast(Any, ControlTask.status).in_([TaskStatus.LEASED, TaskStatus.RUNNING]),
+            cast(Any, ControlTask.lease_expires_at) > completed_at,
+        )
+        .values(
+            status=TaskStatus(outcome.value),
+            result=result,
+            completed_at=completed_at,
+            updated_at=completed_at,
+            lease_owner_id=None,
+            lease_expires_at=None,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    if cast(Any, updated).rowcount != 1:
+        raise ValueError("task lease ownership or version has changed")
+    session.expire_all()
     task = session.get(ControlTask, task_id)
     if task is None:
-        raise ValueError("task is not completable by this worker")
-    if _expired_lease(task, utc_now()):
-        raise ValueError("task lease has expired")
-    if task.lease_owner_id != worker_id or task.status not in {
-        TaskStatus.LEASED, TaskStatus.RUNNING
-    }:
-        raise ValueError("task is not completable by this worker")
-    if lease_version is not None and task.lease_version != lease_version:
-        raise ValueError("task lease version has changed")
-    task.status = TaskStatus(outcome.value)
-    task.result = result
-    task.completed_at = utc_now()
-    task.updated_at = task.completed_at
-    task.lease_owner_id = None
-    task.lease_expires_at = None
-    session.flush()
+        raise ValueError("task disappeared after completion")
     return task
 
 

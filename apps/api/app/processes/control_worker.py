@@ -138,13 +138,16 @@ class ControlWorker:
             interval = max(0.05, self.settings.worker_lease_seconds / 3)
             while not stop.wait(interval):
                 try:
-                    self._renew(task_id)
+                    if not self._renew(task_id, lease_version):
+                        lost.set()
+                        return
                 except ValueError:
                     lost.set()
                     return
 
         def before_side_effect() -> None:
-            self._renew(task_id)
+            if not self._renew(task_id, lease_version):
+                raise ValueError("task lease ownership or version has changed")
 
         with Session(self.engine) as session:
             task = session.get(ControlTask, task_id)
@@ -202,10 +205,17 @@ class ControlWorker:
                 stop.set()
                 heartbeat_thread.join(timeout=1)
 
-    def _renew(self, task_id: UUID) -> None:
+    def _renew(self, task_id: UUID, lease_version: int) -> bool:
         with Session(self.engine) as session:
-            renew_task_lease(session, task_id=task_id, worker_id=self.worker_id, now=self._now())
+            renewed = renew_task_lease(
+                session,
+                task_id=task_id,
+                worker_id=self.worker_id,
+                lease_version=lease_version,
+                now=self._now(),
+            )
             session.commit()
+            return renewed
 
     def _finish_lost_lease(self, session: Session, task: ControlTask) -> None:
         latest = session.get(ControlTask, task.id)

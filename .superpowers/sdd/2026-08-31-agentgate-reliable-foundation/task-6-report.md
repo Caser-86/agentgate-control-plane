@@ -99,3 +99,26 @@ All checks passed!
 mypy app
 Success: no issues found in 50 source files
 ```
+
+## Final lease-race follow-up
+
+- `renew_task_lease` is now a single conditional UPDATE guarded by task,
+  worker, captured `lease_version`, leased/running status, and an unexpired
+  lease. It returns `False` when a stale worker cannot renew.
+- `complete_task` is now a single conditional UPDATE with the same ownership,
+  version, status, and lease guards. A zero-row update raises without flushing
+  stale state; successful completion reloads the row after expiring the local
+  identity map.
+- Added stale renewal and stale completion reclaim-race tests without host
+  mutations.
+
+Final follow-up verification:
+
+```text
+pytest tests/test_control_queue.py tests/test_control_worker.py tests/test_durable_runs.py tests/test_approval_queue.py tests/test_approvals.py tests/test_runs_api.py tests/test_agent_loop.py -q
+36 passed, 2 skipped
+ruff check app tests
+All checks passed!
+mypy app
+Success: no issues found in 50 source files
+```

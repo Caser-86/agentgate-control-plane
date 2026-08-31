@@ -213,19 +213,115 @@ def test_expired_lease_rejects_owner_for_renew_and_completion(operation: str) ->
         assert claim_next_task(session, worker_id=worker_id, capabilities={"control.run"}, now=now)
         expired_at = now + timedelta(seconds=31)
 
-        with pytest.raises(ValueError, match="expired"):
-            if operation == "renew":
-                renew_task_lease(session, task_id=task.id, worker_id=worker_id, now=expired_at)
-            else:
-                task.lease_expires_at = now
-                session.flush()
+        if operation == "renew":
+            assert not renew_task_lease(
+                session,
+                task_id=task.id,
+                worker_id=worker_id,
+                lease_version=task.lease_version,
+                now=expired_at,
+            )
+        else:
+            task.lease_expires_at = now
+            session.flush()
+            with pytest.raises(ValueError, match="lease"):
                 complete_task(
                     session,
                     task_id=task.id,
                     worker_id=worker_id,
+                    lease_version=task.lease_version,
                     outcome=TaskOutcome.SUCCEEDED,
                     result={},
                 )
+
+
+def test_stale_worker_cannot_renew_reclaimed_lease() -> None:
+    engine = create_db_engine("sqlite://")
+    create_db_and_tables(engine)
+    worker_a, worker_b = uuid4(), uuid4()
+    with Session(engine) as session:
+        task = enqueue_task(
+            session,
+            kind=TaskKind.AGENT_RUN,
+            payload={},
+            idempotency_key="stale-renewal",
+            capability="control.run",
+        )
+        claimed_at = task.available_at
+        first = claim_next_task(
+            session, worker_id=worker_a, capabilities={"control.run"}, now=claimed_at
+        )
+        assert first is not None
+        stale_version = first.lease_version
+        assert claim_next_task(
+            session,
+            worker_id=worker_b,
+            capabilities={"control.run"},
+            now=claimed_at + timedelta(seconds=31),
+        ) is None
+        reclaimed = claim_next_task(
+            session,
+            worker_id=worker_b,
+            capabilities={"control.run"},
+            now=task.available_at,
+        )
+        assert reclaimed is not None
+        assert not renew_task_lease(
+            session,
+            task_id=task.id,
+            worker_id=worker_a,
+            lease_version=stale_version,
+            now=task.available_at,
+        )
+        session.refresh(task)
+        assert task.lease_owner_id == worker_b
+        assert task.lease_version == stale_version + 1
+
+
+def test_stale_worker_cannot_complete_reclaimed_lease() -> None:
+    engine = create_db_engine("sqlite://")
+    create_db_and_tables(engine)
+    worker_a, worker_b = uuid4(), uuid4()
+    with Session(engine) as session:
+        task = enqueue_task(
+            session,
+            kind=TaskKind.AGENT_RUN,
+            payload={},
+            idempotency_key="stale-completion",
+            capability="control.run",
+        )
+        claimed_at = task.available_at
+        first = claim_next_task(
+            session, worker_id=worker_a, capabilities={"control.run"}, now=claimed_at
+        )
+        assert first is not None
+        stale_version = first.lease_version
+        assert claim_next_task(
+            session,
+            worker_id=worker_b,
+            capabilities={"control.run"},
+            now=claimed_at + timedelta(seconds=31),
+        ) is None
+        reclaimed = claim_next_task(
+            session,
+            worker_id=worker_b,
+            capabilities={"control.run"},
+            now=task.available_at,
+        )
+        assert reclaimed is not None
+        with pytest.raises(ValueError, match="lease"):
+            complete_task(
+                session,
+                task_id=task.id,
+                worker_id=worker_a,
+                lease_version=stale_version,
+                outcome=TaskOutcome.SUCCEEDED,
+                result={"stale": True},
+            )
+        session.refresh(task)
+        assert task.status == TaskStatus.LEASED
+        assert task.lease_owner_id == worker_b
+        assert task.result is None
 
 
 def test_rollback_discards_domain_mutation_and_outbox_event() -> None:
