@@ -16,23 +16,39 @@ function bootstrapToken(projectName: string): string {
 
 async function hasRecordedRunStatus(page: import("@playwright/test").Page, runId: string, status: string): Promise<boolean> {
   const apiPort = Number(process.env.AGENTGATE_E2E_API_PORT ?? "8000") + 1;
+  const deadline = Date.now() + 15_000;
   let cursor = 0;
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    let response;
+  const diagnostics: string[] = [];
+  while (Date.now() < deadline) {
+    const timeout = Math.max(1, Math.min(1_000, deadline - Date.now()));
+    let response: Awaited<ReturnType<typeof page.request.get>>;
     try {
-      response = await page.request.get(`http://127.0.0.1:${apiPort}/api/runs/${runId}/events?after=${cursor}&limit=1`, { timeout: 1_000 });
-    } catch {
-      return false;
+      response = await page.request.get(`http://127.0.0.1:${apiPort}/api/runs/${runId}/events?after=${cursor}&limit=1`, { timeout });
+    } catch (error) {
+      diagnostics.push(`request: ${error instanceof Error ? error.message : String(error)}`);
+      await new Promise((resolve) => setTimeout(resolve, Math.min(100, Math.max(1, deadline - Date.now()))));
+      continue;
     }
-    if (!response.ok()) throw new Error(`run events request failed: ${response.status()}`);
+    if (!response.ok()) {
+      diagnostics.push(`HTTP ${response.status()}`);
+      await new Promise((resolve) => setTimeout(resolve, Math.min(100, Math.max(1, deadline - Date.now()))));
+      continue;
+    }
     const frame = await response.text();
     const dataLine = frame.split("\n").find((line) => line.startsWith("data: "));
-    if (frame.includes("event: run.updated") && dataLine && (JSON.parse(dataLine.slice(6)) as { status?: string }).status === status) return true;
+    if (frame.includes("event: run.updated") && dataLine) {
+      try {
+        if ((JSON.parse(dataLine.slice(6)) as { status?: string }).status === status) return true;
+      } catch (error) {
+        diagnostics.push(`invalid event JSON: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
     const nextCursor = Number(frame.match(/^id: (\d+)$/m)?.[1]);
-    if (!Number.isSafeInteger(nextCursor) || nextCursor <= cursor) return false;
-    cursor = nextCursor;
+    if (Number.isSafeInteger(nextCursor) && nextCursor > cursor) cursor = nextCursor;
+    else diagnostics.push(frame.trim() ? "empty or non-advancing event frame" : "empty SSE response");
+    await new Promise((resolve) => setTimeout(resolve, Math.min(100, Math.max(1, deadline - Date.now()))));
   }
-  return false;
+  throw new Error(`timed out waiting for recorded run status ${status} for ${runId}; cursor=${cursor}; diagnostics=${diagnostics.slice(-5).join(" | ") || "none"}`);
 }
 
 test("中文首次登录、排队审批拒绝并在刷新后保留审计游标", async ({ page }, testInfo) => {

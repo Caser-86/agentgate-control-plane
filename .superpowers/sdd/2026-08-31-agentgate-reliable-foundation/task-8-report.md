@@ -37,3 +37,8 @@ Existing redaction, error-path, duplicate-approval, SSE cursor, pre-grant no-han
 - 两份 Web E2E spec 现在都断言 POST 返回的 `queued`，通过同一 run 的有界 Outbox SSE 回放确认已记录 `run.updated(status=running)`，再用 `run-status` 确认 `Waiting approval`；审批流额外用稳定 test IDs 断言 `pending_approval`、`denied` 和 `approval.denied` 审计记录。Running 不依赖短暂 DOM 停留，中文流程与现有隔离保持不变。
 - Fresh bounded frontend checks: `npm.cmd run typecheck` — PASS; `npm.cmd run lint` — PASS; `npm.cmd test -- --run` — `7 files, 11 tests passed`; `npm.cmd run build` — PASS。
 - E2E limitation: per request, the bounded E2E run was interrupted before completion and is not claimed as passing. The prior bounded runs reached the durable queued → running → waiting-approval state, but exposed and were used to correct test-source/selector issues; no final E2E pass is reported here.
+
+## Final review fix
+
+- Both E2E status helpers now reconnect and continue through transient request exceptions, empty heartbeat frames, non-advancing cursors, HTTP failures, and malformed event JSON until their own 15-second deadline. They retain the last five diagnostics and fail only after the deadline, preserving the queued → running → waiting approval → denied → audit assertions and test isolation.
+- Fresh bounded E2E attempt: `$env:AGENTGATE_E2E_PYTHON=(Resolve-Path '..\\api\\.venv\\Scripts\\python.exe').Path; $env:AGENTGATE_E2E_API_PORT='18000'; npm.cmd run test:e2e -- --reporter=list` — both isolated projects started and both tests reached the post-approval denial assertion; both then failed after 15 seconds because `[data-testid="action-status"] .status-denied` was not rendered (`2 failed`). No helper timeout or transient SSE/request failure occurred in this run. The E2E suite is therefore not claimed as passing.
