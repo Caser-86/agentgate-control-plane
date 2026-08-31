@@ -15,13 +15,16 @@ from app.control.models import ControlTask, WorkerExecutionGrant, WorkerRegistra
 from app.control.repositories import claim_next_task, complete_task
 from app.models import utc_now
 from app.repositories import AuditRepository
-from app.services.audit import AuditService, redact
+from app.services.audit import AuditService
 
 PROTOCOL_VERSION = "1.0"
 SELF_CHECK_CAPABILITY = "platform.self_check"
 SUPPORTED_CAPABILITIES = frozenset({SELF_CHECK_CAPABILITY})
 MAX_RESULT_BYTES = 4096
 MAX_CAPABILITIES = 1
+SELF_CHECK_RESULT_KEYS = frozenset(
+    {"status", "detail", "worker_version", "protocol_version", "capabilities"}
+)
 
 
 class WorkerProtocolError(ValueError):
@@ -111,14 +114,23 @@ def request_digest(task: ControlTask) -> str:
     ).hexdigest()
 
 
-def sanitize_result(result: dict[str, object]) -> dict[str, object]:
-    redacted = redact(result)
-    if not isinstance(redacted, dict):
+def sanitize_self_check_result(result: dict[str, object]) -> dict[str, object]:
+    if not isinstance(result, dict):
         raise WorkerProtocolError(422, "invalid_result")
-    encoded = _canonical_json(redacted)
+    safe: dict[str, object] = {}
+    for key in SELF_CHECK_RESULT_KEYS - {"capabilities"}:
+        value = result.get(key)
+        if isinstance(value, str):
+            safe[key] = value
+    capabilities = result.get("capabilities")
+    if isinstance(capabilities, list) and all(isinstance(item, str) for item in capabilities):
+        safe["capabilities"] = sorted(set(capabilities))
+    if "status" not in safe:
+        raise WorkerProtocolError(422, "invalid_result")
+    encoded = _canonical_json(safe)
     if len(encoded) > MAX_RESULT_BYTES:
         raise WorkerProtocolError(422, "result_too_large")
-    return redacted
+    return safe
 
 
 def register_worker(
@@ -308,7 +320,7 @@ def complete_worker_task(
     if worker is None:
         raise WorkerProtocolError(401, "authentication_required")
     _require_protocol(protocol_version, worker.protocol_version)
-    safe_result = sanitize_result(result)
+    safe_result = sanitize_self_check_result(result)
     task = session.get(ControlTask, task_id)
     if task is not None and task.status == TaskStatus.SUCCEEDED:
         _grant_for_completion(

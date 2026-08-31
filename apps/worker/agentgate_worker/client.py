@@ -9,10 +9,29 @@ from agentgate_worker.vault import WorkerCredentials, WorkerVault
 
 PROTOCOL_VERSION = "1.0"
 SELF_CHECK_CAPABILITY = "platform.self_check"
+SELF_CHECK_RESULT_KEYS = frozenset(
+    {"status", "detail", "worker_version", "protocol_version", "capabilities"}
+)
 
 
 class WorkerProtocolError(RuntimeError):
     pass
+
+
+def sanitize_self_check_result(result: dict[str, object]) -> dict[str, object]:
+    if not isinstance(result, dict):
+        raise WorkerProtocolError("Worker self-check result must be an object")
+    safe: dict[str, object] = {}
+    for key in SELF_CHECK_RESULT_KEYS - {"capabilities"}:
+        value = result.get(key)
+        if isinstance(value, str):
+            safe[key] = value
+    capabilities = result.get("capabilities")
+    if isinstance(capabilities, list) and all(isinstance(item, str) for item in capabilities):
+        safe["capabilities"] = sorted(set(capabilities))
+    if "status" not in safe:
+        raise WorkerProtocolError("Worker self-check result is missing status")
+    return safe
 
 
 class Transport(Protocol):
@@ -167,21 +186,23 @@ class WorkerClient:
         self.journal.record_started(grant.task_id, grant.request_digest, grant.lease_expires_at)
 
     def complete(self, grant: TaskGrant, result: dict[str, object]) -> None:
-        self.journal.record_result(grant.task_id, result)
+        safe_result = sanitize_self_check_result(result)
+        self.journal.record_result(grant.task_id, safe_result)
         self._request(
             "POST",
             f"/api/v1/worker/tasks/{grant.task_id}/complete",
-            {"request_digest": grant.request_digest, "result": result},
+            {"request_digest": grant.request_digest, "result": safe_result},
         )
         self.journal.mark_reported(grant.task_id)
 
     def recover_pending_reports(self) -> int:
         recovered = 0
         for task_id, request_digest, result in self.journal.pending_reports():
+            safe_result = sanitize_self_check_result(result)
             self._request(
                 "POST",
                 f"/api/v1/worker/tasks/{task_id}/report",
-                {"request_digest": request_digest, "result": result},
+                {"request_digest": request_digest, "result": safe_result},
             )
             self.journal.mark_reported(task_id)
             recovered += 1

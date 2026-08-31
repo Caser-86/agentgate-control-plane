@@ -51,3 +51,33 @@ def test_client_recovers_journaled_result_using_report_endpoint(tmp_path: object
     assert recovered == 1
     assert transport.requests[-1][1] == "/api/v1/worker/tasks/task-1/report"
     assert journal.pending_reports() == []
+
+
+def test_client_complete_sends_only_self_check_fields(tmp_path: object) -> None:
+    journal = WorkerJournal(tmp_path / "journal.db")  # type: ignore[operator]
+    journal.record_started("task-2", "a" * 64, datetime.now(UTC) + timedelta(seconds=30))
+    transport = RecordingTransport()
+    client = WorkerClient(
+        base_url="http://localhost:8000",
+        vault=InMemoryVault(),
+        journal=journal,
+        transport=transport,
+        worker_name="local-worker",
+        worker_version="0.1.0",
+        capabilities={"platform.self_check"},
+    )
+    client.vault.save(WorkerCredentials("worker-1", "worker-token", "1.0"))
+    grant = type("Grant", (), {"task_id": "task-2", "request_digest": "a" * 64})()
+
+    client.complete(
+        grant,
+        {
+            "status": "succeeded",
+            "detail": "read-only",
+            "command": "powershell Remove-Item C:\\",
+            "unknown": {"client_secret": "not-for-journal"},
+        },
+    )
+
+    sent = transport.requests[-1][2]["result"]
+    assert sent == {"status": "succeeded", "detail": "read-only"}

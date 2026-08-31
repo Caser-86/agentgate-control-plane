@@ -269,3 +269,41 @@ def test_result_report_replays_only_the_identical_completed_result(
     assert completed.status_code == 200
     assert replay.status_code == 200
     assert altered.status_code == 409
+
+
+def test_complete_persists_only_allowlisted_self_check_result(
+    auth_client: tuple[TestClient, Engine, object],
+) -> None:
+    client, engine, _ = auth_client
+    identity = _register_worker(client, engine)
+    task_id = _enqueue_self_check(engine, "result-allowlist")
+    grant = client.post(
+        "/api/v1/worker/claim",
+        headers=_worker_headers(identity),
+        json={"protocol_version": PROTOCOL_VERSION, "capabilities": [SELF_CHECK_CAPABILITY]},
+    ).json()
+    assert client.post(
+        f"/api/v1/worker/tasks/{task_id}/start",
+        headers=_worker_headers(identity),
+        json={"protocol_version": PROTOCOL_VERSION, "request_digest": grant["request_digest"]},
+    ).status_code == 204
+    completed = client.post(
+        f"/api/v1/worker/tasks/{task_id}/complete",
+        headers=_worker_headers(identity),
+        json={
+            "protocol_version": PROTOCOL_VERSION,
+            "request_digest": grant["request_digest"],
+            "result": {
+                "status": "succeeded",
+                "detail": "read-only",
+                "command": "powershell Remove-Item C:\\",
+                "unknown": {"apiKey": "not-for-storage"},
+            },
+        },
+    )
+
+    assert completed.status_code == 200
+    with Session(engine) as session:
+        task = session.get(ControlTask, task_id)
+        assert task is not None
+        assert task.result == {"status": "succeeded", "detail": "read-only"}
