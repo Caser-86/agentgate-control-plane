@@ -84,3 +84,11 @@ Every planned task is represented below. A row exists for each task's own consis
 - Reordered `verify-foundation.ps1` so the proposed safe no-op is consumed by a temporary native Worker before heartbeat verification; temporary state cleanup is bounded and credentials are never printed.
 - Fresh evidence: backend `156 passed, 5 skipped`, Ruff/mypy/evals pass; frontend lint/typecheck/Vitest `7 files, 12 tests`/build pass; Compose config and PowerShell AST pass; bounded E2E `2 passed (14.4s)` on ports 18220/18221.
 - Exact limitation: Bypass foundation run failed at line 29 with `API health check failed.` because the worktree Compose stack was not running; port inspection found two unrelated listeners on 8000. PostgreSQL race tests remain skipped because `AGENTGATE_TEST_DATABASE_URL` is unset. Stage 0 remains not accepted.
+
+## Final whole-branch review fixes — 2026-09-01
+
+- [x] Native Worker completion atomically writes the successful ControlTask mutation, one task-scoped `task.updated` Outbox event, Worker audit event, and grant completion; succeeded replay remains idempotent. Focused regression passed.
+- [x] Added authenticated read-only `GET /api/v1/checks/{check_id}` and changed `verify-foundation.ps1` to validate the exact submitted task ID, succeeded task/result status, and allowlisted result keys after the native Worker round trip. Temporary credentials/journal are removed in `finally`; token contents are never printed.
+- [x] Localized RunDetailPage loading/error/failed-run copy into Chinese fixed safe text and added a regression proving underlying exception text is not exposed.
+- [x] Fresh evidence: backend `157 passed, 5 skipped`; Ruff/mypy/evals pass; frontend `7 files, 13 tests`/lint/typecheck/build pass; Compose config and PowerShell AST pass; bounded E2E `2 passed` on `18220/18221`.
+- [ ] Foundation live verification remains unavailable: Bypass run failed at line 29 with `API health check failed.` because the Compose API was not running. PostgreSQL race coverage remains skipped because `AGENTGATE_TEST_DATABASE_URL` is unset. No persistent/user database or service restart was used.

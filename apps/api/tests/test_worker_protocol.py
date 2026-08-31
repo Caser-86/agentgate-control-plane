@@ -7,7 +7,7 @@ from sqlmodel import Session, select
 from app.auth.models import ClientToken
 from app.auth.security import digest_secret
 from app.control.enums import TaskKind, TaskStatus
-from app.control.models import ControlTask, WorkerRegistration
+from app.control.models import ControlTask, OutboxEvent, WorkerRegistration
 from app.control.repositories import enqueue_task
 
 PROTOCOL_VERSION = "1.0"
@@ -214,9 +214,20 @@ def test_start_and_complete_require_claim_owner_and_request_digest(
     assert completed.status_code == 200
     with Session(engine) as session:
         task = session.get(ControlTask, task_id)
+        events = list(
+            session.exec(
+                select(OutboxEvent).where(
+                    OutboxEvent.event_type == "task.updated",
+                    OutboxEvent.resource_type == "task",
+                    OutboxEvent.resource_id == task_id,
+                )
+            ).all()
+        )
         assert task is not None
         assert task.status == TaskStatus.SUCCEEDED
         assert task.result == {"status": "succeeded"}
+        assert len(events) == 1
+        assert events[0].payload == {"status": "succeeded", "task_id": str(task_id)}
 
 
 def test_result_report_replays_only_the_identical_completed_result(

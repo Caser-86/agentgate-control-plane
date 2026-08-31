@@ -83,3 +83,19 @@ Existing redaction, error-path, duplicate-approval, SSE cursor, pre-grant no-han
 - `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-foundation.ps1` — FAIL at line 29 with `API health check failed.` The worktree Compose stack was not running; port inspection showed `8000` held by two unrelated listeners. The script did not start or restart services. Temporary E2E ports had no remaining listeners.
 
 Stage 0 is **not accepted**: live foundation verification and PostgreSQL-specific race coverage remain unavailable in this environment, despite the bounded E2E and all available local checks passing.
+
+## Final whole-branch review fixes — 2026-09-01
+
+- Native Worker completion now appends exactly one `task.updated` Outbox event in the same transaction as successful `ControlTask` completion. It uses `resource_type="task"`, the task ID, and a sanitized status/task ID payload; succeeded replay remains idempotent and does not append a duplicate.
+- Added authenticated read-only `GET /api/v1/checks/{check_id}` protected by `propose:checks`. It returns only the requested safe `platform.self_check` task and redacts its result. Focused tests cover the submitted check ID and queued → started → succeeded durable task event.
+- `scripts/verify-foundation.ps1` now validates the exact submitted check ID after the native Worker round trip, requires task/result `succeeded`, rejects unknown result fields, and removes temporary `credentials.bin`, `journal.db`, and state directory in `finally`. Token contents remain out of output; structured Compose port inspection is preserved.
+- RunDetailPage loading/error/failed-run copy is fixed Chinese safe text; underlying exception text and backend `error_message` are no longer rendered. The focused frontend regression covers loading/error localization and secret-free output.
+
+### Fresh verification for this fix pass
+
+- Focused backend regressions: `2 passed`; full backend: `157 passed, 5 skipped in 8.43s`.
+- Backend Ruff passed; mypy reported `Success: no issues found in 53 source files`; all six eval cases scored `4/4 PASS`.
+- Frontend full Vitest: `7 files, 13 tests passed`; lint, typecheck, and build passed.
+- `docker compose config --quiet` and PowerShell AST parse passed.
+- Bounded E2E on isolated ports `18220/18221`: `2 passed (16.0s)`.
+- `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-foundation.ps1` failed at line 29 with `API health check failed.` because the Compose API was not running. No service was started/restarted. PostgreSQL-specific tests remain skipped because `AGENTGATE_TEST_DATABASE_URL` is unset; no persistent/user database was used.

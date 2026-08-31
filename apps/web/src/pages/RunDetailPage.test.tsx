@@ -17,6 +17,29 @@ vi.mock("../api/client", () => ({
 }));
 
 describe("RunDetailPage", () => {
+  it("shows safe Chinese loading and error copy without the underlying exception", async () => {
+    vi.mocked(api.getRun).mockRejectedValue(new Error("secret backend token"));
+    vi.stubGlobal("EventSource", class {
+      close() {}
+      addEventListener() {}
+      onerror = null;
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/runs/run-error"]}>
+        <Routes>
+          <Route path="/runs/:runId" element={<RunDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("正在加载运行详情…")).toBeInTheDocument();
+    expect(await screen.findByText("运行暂时不可用")).toBeInTheDocument();
+    expect(screen.getByText("无法加载该运行详情，请稍后重试。")).toBeInTheDocument();
+    expect(screen.queryByText("secret backend token")).not.toBeInTheDocument();
+    expect(screen.queryByText("Run unavailable")).not.toBeInTheDocument();
+  });
+
   it("ignores stale and malformed SSE frames before they can replace REST state", () => {
     expect(
       parseRunEvent({ lastEventId: "11", type: "run.updated", data: '{"status":"completed"}' } as MessageEvent<string>, 10),

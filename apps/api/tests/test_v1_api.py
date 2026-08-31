@@ -124,6 +124,33 @@ def test_platform_self_check_proposal_creates_native_worker_safe_payload(
         assert task.capability == "platform.self_check"
 
 
+def test_check_status_reads_the_submitted_task_with_check_scope(
+    auth_client: tuple[TestClient, object, object]
+) -> None:
+    client, _, token_file = auth_client
+    token = _adapter_token(client, token_file, ["propose:checks"])
+    response = client.post(
+        "/api/v1/checks",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "check_type": "platform.self_check",
+            "target": "local",
+            "parameters": {},
+            "idempotency_key": "check-status-contract",
+        },
+    )
+    assert response.status_code == 201
+    check_id = response.json()["id"]
+
+    status = client.get(
+        f"/api/v1/checks/{check_id}", headers={"Authorization": f"Bearer {token}"}
+    )
+
+    assert status.status_code == 200
+    assert status.json()["id"] == check_id
+    assert status.json()["status"] == "queued"
+
+
 def test_unsupported_check_proposal_is_rejected_without_orphan_task(
     auth_client: tuple[TestClient, object, object],
 ) -> None:

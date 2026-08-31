@@ -12,7 +12,7 @@ from app.auth.models import ClientToken
 from app.auth.security import digest_secret, new_secret
 from app.control.enums import TaskKind, TaskOutcome, TaskStatus, WorkerStatus
 from app.control.models import ControlTask, WorkerExecutionGrant, WorkerRegistration
-from app.control.repositories import claim_next_task, complete_task
+from app.control.repositories import append_outbox_event, claim_next_task, complete_task
 from app.models import utc_now
 from app.repositories import AuditRepository
 from app.services.audit import AuditService
@@ -353,6 +353,13 @@ def complete_worker_task(
         raise WorkerProtocolError(403, "task_not_completable") from error
     grant.completed_at = utc_now()
     session.add(grant)
+    append_outbox_event(
+        session,
+        event_type="task.updated",
+        resource_type="task",
+        resource_id=completed.id,
+        payload={"status": completed.status.value, "task_id": str(completed.id)},
+    )
     _audit(
         session,
         event_type="worker.task.completed",

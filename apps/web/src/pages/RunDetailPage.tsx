@@ -26,8 +26,8 @@ export function RunDetailPage() {
   const reload = useCallback(() => { void load(); }, [load]);
   const connection = useRunEvents(runId, reload, reload);
 
-  if (error) return <div className="page-shell"><Link className="back-link" to="/">← Back to runs</Link><div className="error-panel"><span className="eyebrow">Safe error</span><h1>Run unavailable</h1><p>{error}</p></div></div>;
-  if (!detail) return <div className="page-shell"><div className="loading-row">Loading run detail…</div></div>;
+  if (error) return <div className="page-shell"><Link className="back-link" to="/">← 返回运行列表</Link><div className="error-panel"><span className="eyebrow">安全错误</span><h1>运行暂时不可用</h1><p>无法加载该运行详情，请稍后重试。</p></div></div>;
+  if (!detail) return <div className="page-shell"><div className="loading-row">正在加载运行详情…</div></div>;
   const pending = detail.actions.find((action) => action.status === "pending_approval");
 
   return (
@@ -40,7 +40,7 @@ export function RunDetailPage() {
         <aside className="panel side-panel"><div className="section-heading"><div><span className="eyebrow">运行元数据</span><h2>控制事实</h2></div></div><dl className="facts-list"><div><dt>状态</dt><dd><StatusBadge value={detail.status} /></dd></div><div><dt>Provider</dt><dd><code>{detail.provider}</code></dd></div><div><dt>模型</dt><dd><code>{detail.model}</code></dd></div><div><dt>步骤</dt><dd>{detail.step_count.toString().padStart(2, "0")}</dd></div></dl></aside>
       </div>
       {detail.final_text && <section className="panel final-panel"><span className="eyebrow">Agent 结论</span><h2>安全结果</h2><p>{detail.final_text}</p></section>}
-      {detail.status === "failed" && <section className="error-panel"><span className="eyebrow">安全错误</span><h2>运行在完成前停止</h2><p>{detail.error_message ?? "运行触达受保护的失败边界。"}</p></section>}
+      {detail.status === "failed" && <section className="error-panel"><span className="eyebrow">安全错误</span><h2>运行在完成前停止</h2><p>运行触达受保护的失败边界。</p></section>}
       <section className="panel actions-panel"><div className="section-heading"><div><span className="eyebrow">工具操作</span><h2>操作账本</h2></div></div><div className="action-list">{detail.actions.map((action) => <div className="action-row" key={action.id}><div><strong>{action.tool_name}</strong><span>{action.reason}</span></div><div className="action-meta"><StatusBadge value={action.risk_level} /><span data-testid="action-status"><StatusBadge value={action.status} /></span></div><details><summary>参数</summary><pre>{formatArguments(action.arguments)}</pre></details>{action.result !== null && <details><summary>结果</summary><pre>{formatArguments(action.result)}</pre></details>}</div>)}</div></section>
     </div>
   );

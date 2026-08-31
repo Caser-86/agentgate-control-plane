@@ -42,6 +42,7 @@ $check = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:$apiPort/api/v1/c
     -Headers @{ Authorization = "Bearer $WorkerCheckToken" } `
     -ContentType "application/json" `
     -Body (@{ check_type = "platform.self_check"; target = "local"; parameters = @{}; idempotency_key = "verify-foundation:$([Guid]::NewGuid())" } | ConvertTo-Json -Compress)
+if ($null -eq $check.id) { throw "Foundation self-check did not return a task id." }
 $workerPython = Join-Path $repoRoot "apps\api\.venv\Scripts\python.exe"
 $workerRoot = Join-Path $repoRoot "apps\worker"
 if (-not (Test-Path -LiteralPath $workerPython)) { throw "Native Worker Python runtime was not found." }
@@ -55,8 +56,23 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Native Worker self-check round trip failed." }
 } finally {
     if (Test-Path -LiteralPath $workerStateDir) {
+        Remove-Item -LiteralPath (Join-Path $workerStateDir "credentials.bin") -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath (Join-Path $workerStateDir "journal.db") -Force -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath $workerStateDir -Recurse -Force -ErrorAction SilentlyContinue
     }
+}
+$checkStatus = $null
+try {
+    $checkStatus = Invoke-RestMethod -Headers @{ Authorization = "Bearer $WorkerCheckToken" } -Uri "http://127.0.0.1:$apiPort/api/v1/checks/$($check.id)" -TimeoutSec 5
+} catch {
+    throw "Submitted foundation self-check status could not be read."
+}
+if ($null -eq $checkStatus -or "$($checkStatus.id)" -ne "$($check.id)") { throw "Submitted foundation self-check task was not found." }
+if ($checkStatus.status -ne "succeeded" -or $null -eq $checkStatus.result) { throw "Submitted foundation self-check did not reach succeeded." }
+$allowedResultKeys = @("status", "detail", "worker_version", "protocol_version", "capabilities")
+$resultKeys = @($checkStatus.result.PSObject.Properties.Name)
+if ($checkStatus.result.status -ne "succeeded" -or @($resultKeys | Where-Object { $_ -notin $allowedResultKeys }).Count -gt 0) {
+    throw "Submitted foundation self-check returned an invalid result."
 }
 $platform = Invoke-RestMethod -Headers $operatorHeaders -Uri "http://127.0.0.1:$apiPort/api/platform/self-check" -TimeoutSec 5
 if ($null -eq $platform.migration_check -or $platform.migration_check.status -ne "ok" -or $platform.migration_check.code -ne "database_migration_current") { throw "Database migration is missing or stale." }

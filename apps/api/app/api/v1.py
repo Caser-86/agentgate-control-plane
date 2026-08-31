@@ -1,5 +1,5 @@
 from typing import Annotated
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import ValidationError
@@ -7,6 +7,7 @@ from sqlmodel import Session
 
 from app.auth.dependencies import ClientIdentity, require_client_scope
 from app.control.enums import SideEffectCertainty, TaskKind
+from app.control.models import ControlTask
 from app.control.repositories import enqueue_task
 from app.db import get_session
 from app.policy import PolicyEngine
@@ -16,8 +17,9 @@ from app.schemas import (
     CheckProposalRequest,
     EventProposalRequest,
     ProposalResponse,
+    TaskStatusResponse,
 )
-from app.services.audit import AuditService
+from app.services.audit import AuditService, redact
 from app.tools.registry import RegisteredTool, ToolRegistry, UnknownToolError
 
 router = APIRouter(prefix="/api/v1", tags=["v1"])
@@ -97,6 +99,29 @@ def propose_check(
     session.commit()
     session.refresh(task)
     return ProposalResponse(id=task.id)
+
+
+@router.get("/checks/{check_id}", response_model=TaskStatusResponse)
+def get_check_status(
+    check_id: UUID, client: CheckClientDep, session: SessionDep
+) -> TaskStatusResponse:
+    del client
+    task = session.get(ControlTask, check_id)
+    if task is None or task.kind != TaskKind.CONTROL or task.capability != "platform.self_check":
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "not_found", "message": "check was not found"},
+        )
+    return TaskStatusResponse(
+        id=task.id,
+        kind=task.kind.value,
+        status=task.status.value,
+        attempts=task.attempts,
+        run_id=task.run_id,
+        available_at=task.available_at,
+        lease_expires_at=task.lease_expires_at,
+        result=redact(task.result),
+    )
 
 
 @router.post("/actions", response_model=ProposalResponse)
