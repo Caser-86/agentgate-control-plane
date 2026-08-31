@@ -7,7 +7,7 @@ from sqlmodel import Session, select
 
 from app.control.enums import SideEffectCertainty, TaskKind, TaskStatus
 from app.control.models import ControlTask, OutboxEvent
-from app.control.repositories import enqueue_task
+from app.control.repositories import claim_next_task, enqueue_task
 from app.db import create_db_and_tables, create_db_engine, seed_demo_state
 from app.llm.base import ModelTurn
 from app.models import (
@@ -139,12 +139,10 @@ def test_worker_marks_lease_loss_after_possible_side_effect_without_retry() -> N
     create_db_and_tables(engine)
     calls: list[str] = []
     worker_id = UUID("00000000-0000-0000-0000-000000000001")
-    other_worker_id = UUID("00000000-0000-0000-0000-000000000002")
 
     async def handler(_arguments, session: Session) -> dict[str, object]:
         calls.append("executed")
         task = session.exec(select(ControlTask)).one()
-        task.lease_owner_id = other_worker_id
         task.lease_expires_at = utc_now() - timedelta(seconds=1)
         session.add(task)
         session.commit()
@@ -195,6 +193,50 @@ def test_worker_marks_lease_loss_after_possible_side_effect_without_retry() -> N
     assert calls == ["executed"]
     assert task is not None
     assert task.status == TaskStatus.MANUAL_REVIEW
+
+
+def test_lost_lease_recovery_does_not_mark_reclaimed_owner_for_manual_review() -> None:
+    engine = create_db_engine("sqlite://")
+    create_db_and_tables(engine)
+    worker_a, worker_b = UUID("00000000-0000-0000-0000-000000000011"), UUID(
+        "00000000-0000-0000-0000-000000000012"
+    )
+    with Session(engine) as session:
+        task = enqueue_task(
+            session,
+            kind=TaskKind.AGENT_RUN,
+            payload={"run_id": str(UUID(int=1))},
+            idempotency_key="lost-lease-reclaim-race",
+            capability="control.run",
+            run_id=UUID(int=1),
+            side_effect_certainty=SideEffectCertainty.READ_ONLY,
+        )
+        claimed_at = task.available_at
+        first = claim_next_task(
+            session, worker_id=worker_a, capabilities={"control.run"}, now=claimed_at
+        )
+        assert first is not None
+        stale_version = first.lease_version
+        assert claim_next_task(
+            session,
+            worker_id=worker_b,
+            capabilities={"control.run"},
+            now=claimed_at + timedelta(seconds=31),
+        ) is None
+        session.commit()
+        reclaimed = claim_next_task(
+            session,
+            worker_id=worker_b,
+            capabilities={"control.run"},
+            now=first.available_at,
+        )
+        assert reclaimed is not None
+        worker = ControlWorker(engine, worker_id=worker_a)
+        worker._finish_lost_lease(session, first, worker_a, stale_version)
+        session.refresh(reclaimed)
+        assert reclaimed.status == TaskStatus.LEASED
+        assert reclaimed.lease_owner_id == worker_b
+        assert reclaimed.lease_version == stale_version + 1
 
 
 class SlowProvider:

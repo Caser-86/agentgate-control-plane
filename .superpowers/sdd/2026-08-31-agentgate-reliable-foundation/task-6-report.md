@@ -100,6 +100,26 @@ mypy app
 Success: no issues found in 50 source files
 ```
 
+## Final lost-lease recovery race follow-up
+
+- `_finish_lost_lease` now uses one conditional UPDATE guarded by the original
+  worker ID, captured lease version, leased/running status, and expired lease.
+- A zero-row recovery update returns without changing or committing the later
+  owner's task state.
+- Added a reclaim-race test proving an old worker cannot mark a reclaimed task
+  `manual_review`.
+
+Final verification:
+
+```text
+pytest tests/test_control_worker.py tests/test_control_queue.py tests/test_durable_runs.py tests/test_approval_queue.py tests/test_approvals.py tests/test_runs_api.py tests/test_agent_loop.py -q
+36 passed, 2 skipped
+ruff check app tests
+All checks passed!
+mypy app
+Success: no issues found in 50 source files
+```
+
 ## Final lease-race follow-up
 
 - `renew_task_lease` is now a single conditional UPDATE guarded by task,

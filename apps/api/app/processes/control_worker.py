@@ -5,9 +5,11 @@ import logging
 import threading
 import time
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import datetime
+from typing import Any, cast
 from uuid import UUID, uuid4
 
+from sqlalchemy import update
 from sqlalchemy.engine import Engine
 from sqlmodel import Session
 
@@ -85,7 +87,7 @@ class ControlWorker:
                 lease_version=lease_version,
                 now=self._now(),
             ):
-                self._finish_lost_lease(session, task)
+                self._finish_lost_lease(session, task, self.worker_id, lease_version)
                 return 1
             session.commit()
 
@@ -197,7 +199,7 @@ class ControlWorker:
                 # existing recovery path will requeue read-only work or require manual
                 # review for possible side effects; never execute it a second time here.
                 session.rollback()
-                self._finish_lost_lease(session, task)
+                self._finish_lost_lease(session, task, self.worker_id, lease_version)
             except Exception:
                 session.rollback()
                 logger.exception("control_worker_task_failed")
@@ -217,27 +219,40 @@ class ControlWorker:
             session.commit()
             return renewed
 
-    def _finish_lost_lease(self, session: Session, task: ControlTask) -> None:
-        latest = session.get(ControlTask, task.id)
-        if latest is None or latest.lease_expires_at is None:
+    def _finish_lost_lease(
+        self, session: Session, task: ControlTask, worker_id: UUID, lease_version: int
+    ) -> None:
+        completed_at = self._now()
+        updated = session.execute(
+            update(ControlTask)
+            .where(
+                cast(Any, ControlTask.id) == task.id,
+                cast(Any, ControlTask.lease_owner_id) == worker_id,
+                cast(Any, ControlTask.lease_version) == lease_version,
+                cast(Any, ControlTask.status).in_([TaskStatus.LEASED, TaskStatus.RUNNING]),
+                cast(Any, ControlTask.lease_expires_at) <= completed_at,
+            )
+            .values(
+                status=TaskStatus.MANUAL_REVIEW,
+                error_class="control_task_lease_lost",
+                completed_at=completed_at,
+                updated_at=completed_at,
+                lease_owner_id=None,
+                lease_expires_at=None,
+            )
+            .execution_options(synchronize_session=False)
+        )
+        if cast(Any, updated).rowcount != 1:
             return
-        expiry = latest.lease_expires_at
-        if expiry.tzinfo is None:
-            expiry = expiry.replace(tzinfo=UTC)
-        if expiry > self._now():
-            return
-        latest.status = TaskStatus.MANUAL_REVIEW
-        latest.error_class = "control_task_lease_lost"
-        latest.completed_at = self._now()
-        latest.lease_owner_id = None
-        latest.lease_expires_at = None
-        session.add(latest)
         append_outbox_event(
             session,
             event_type="task.updated",
             resource_type="task",
-            resource_id=latest.id,
-            payload={"status": latest.status.value, "error": latest.error_class},
+            resource_id=task.id,
+            payload={
+                "status": TaskStatus.MANUAL_REVIEW.value,
+                "error": "control_task_lease_lost",
+            },
         )
         session.commit()
 
