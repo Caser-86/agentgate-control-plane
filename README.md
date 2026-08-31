@@ -53,6 +53,8 @@ Set-Location ..\..
 
 手动迁移：`powershell -File .\scripts\migrate-local.ps1`。基础设施验收：`powershell -File .\scripts\verify-foundation.ps1`。Windows 前端命令统一使用 `npm.cmd`。
 
+原生 Worker 使用本地专用虚拟环境 `apps/worker/.venv`，不会复用 API 的 `.venv`。首次运行 `setup-local.ps1` 会幂等地创建该环境并执行 `pip install -e apps/worker`（包含 Windows `pywin32`/`win32crypt` 依赖）；验收脚本会检查解释器和依赖，缺失时给出同一 setup 命令。API/Web 的实际 loopback host 端口由 Compose 的 `AGENTGATE_API_PORT`/`AGENTGATE_WEB_PORT`（默认 8000/5173）解析，脚本不会假定 host 端口。
+
 ## Live OpenAI-compatible configuration
 
 Copy `.env.example` to `.env`, rotate any key that has previously been exposed, and set only the backend variables:

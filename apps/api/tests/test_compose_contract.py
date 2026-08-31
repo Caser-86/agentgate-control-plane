@@ -34,6 +34,28 @@ def test_api_and_web_bind_only_to_loopback() -> None:
     assert '"127.0.0.1:${AGENTGATE_WEB_PORT:-5173}:80"' in COMPOSE
 
 
+def test_local_scripts_derive_configured_host_ports() -> None:
+    start_script = (REPO_ROOT / "scripts/start-local.ps1").read_text(encoding="utf-8")
+    setup_script = (REPO_ROOT / "scripts/setup-local.ps1").read_text(encoding="utf-8")
+    verify_script = (REPO_ROOT / "scripts/verify-foundation.ps1").read_text(encoding="utf-8")
+    for script in (start_script, setup_script, verify_script):
+        assert "docker compose config --format json" in script
+        assert "AGENTGATE_API_PORT" in script
+        assert "AGENTGATE_WEB_PORT" in script
+    assert '"http://127.0.0.1:8000/health"' not in start_script
+    assert '"http://localhost:5173"' not in setup_script
+
+
+def test_foundation_verification_uses_worker_environment_with_worker_dependencies() -> None:
+    script = (REPO_ROOT / "scripts/verify-foundation.ps1").read_text(encoding="utf-8")
+    assert 'Join-Path $repoRoot "apps\\worker"' in script
+    assert 'Join-Path $workerVenv "Scripts\\python.exe"' in script
+    assert "apps\\api\\.venv\\Scripts\\python.exe" not in script
+    assert "win32crypt" in script
+    setup_script = (REPO_ROOT / "scripts/setup-local.ps1").read_text(encoding="utf-8")
+    assert "pip install -e" in setup_script
+
+
 def test_scheduler_and_worker_have_distinct_durable_roles() -> None:
     assert "due-task" in COMPOSE or "due_task" in COMPOSE or "scheduler" in COMPOSE
     assert "lease" in COMPOSE

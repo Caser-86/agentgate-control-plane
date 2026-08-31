@@ -14,3 +14,5 @@
 
 - Compose 第一次运行发现迁移 revision 名超过既有 `alembic_version.version_num VARCHAR(32)`；已将 revision 缩短为 `0007_bound_grants_check_owner`。第二次镜像构建因依赖下载超过 30 秒有界窗口而终止，故本轮没有宣称修正后的容器迁移/E2E 已通过。
 - 工作树未提供可用的 `AGENTGATE_TEST_DATABASE_URL`，PostgreSQL pytest 用例保持跳过。
+
+本轮最终集成修复证据：`apps/api/tests/test_compose_contract.py` 为 `10 passed`；Worker `8 passed`；后端 `165 passed, 5 skipped`；前端 `7 files/13 tests passed`，lint/typecheck/build 退出码 0；Compose config、PowerShell 解析和 diff check 均通过。未启动服务，因此 bounded E2E 与 live foundation verification 未执行。详见 `reports/task-8-report.md`。

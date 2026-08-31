@@ -8,6 +8,7 @@ param(
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $repoRoot
+# Compose resolves AGENTGATE_API_PORT and AGENTGATE_WEB_PORT from the environment.
 $configJson = docker compose config --format json
 if ($LASTEXITCODE -ne 0) { throw "docker compose config failed." }
 $config = $configJson | ConvertFrom-Json
@@ -42,14 +43,19 @@ $readiness = Invoke-RestMethod -Headers $operatorHeaders -Uri ("http://127.0.0.1
 if ($null -eq $readiness.migration_check -or $readiness.migration_check.status -ne "ok" -or $readiness.migration_check.code -ne "database_migration_current") {
     throw "Database migration is missing or stale before native Worker execution."
 }
+$workerRoot = Join-Path $repoRoot "apps\worker"
+$workerVenv = Join-Path $workerRoot ".venv"
+$workerPython = Join-Path $workerVenv "Scripts\python.exe"
+if (-not (Test-Path -LiteralPath $workerPython)) { throw "Native Worker Python runtime was not found." }
+$workerImportCheck = & $workerPython -c "import win32crypt; import agentgate_worker; print('worker-runtime-ok')" 2>&1
+if ($LASTEXITCODE -ne 0 -or ($workerImportCheck -join "") -notmatch "worker-runtime-ok") {
+    throw "Native Worker dependencies are not installed in apps/worker/.venv; run .\scripts\setup-local.ps1 (the command is idempotent and does not print secrets)."
+}
 $check = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:$apiPort/api/v1/checks" `
     -Headers @{ Authorization = "Bearer $WorkerCheckToken" } `
     -ContentType "application/json" `
     -Body (@{ check_type = "platform.self_check"; target = "local"; parameters = @{}; idempotency_key = "verify-foundation:$([Guid]::NewGuid())" } | ConvertTo-Json -Compress)
 if ($null -eq $check.id) { throw "Foundation self-check did not return a task id." }
-$workerPython = Join-Path $repoRoot "apps\api\.venv\Scripts\python.exe"
-$workerRoot = Join-Path $repoRoot "apps\worker"
-if (-not (Test-Path -LiteralPath $workerPython)) { throw "Native Worker Python runtime was not found." }
 $workerStateDir = Join-Path ([System.IO.Path]::GetTempPath()) ("agentgate-worker-verify-" + [Guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $workerStateDir -Force | Out-Null
 try {
