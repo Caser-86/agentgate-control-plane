@@ -24,27 +24,33 @@ flowchart LR
     API --> Runner[Checkpointed AgentRunner]
     Runner --> Policy[Fail-closed PolicyEngine]
     Runner --> Executor[Idempotent ToolExecutor]
-    Executor --> DB[(SQLite + audit)]
+    Executor --> DB[(PostgreSQL + audit)]
+    API --> Scheduler[scheduler]
+    API --> ControlWorker[control-worker]
+    Scheduler --> DB
+    ControlWorker --> DB
     Runner --> LLM[Mock or OpenAI-compatible provider]
 ```
 
-See [the detailed architecture](docs/architecture.md) for state machines, approval sequence and production evolution.
+See [the detailed architecture](docs/architecture.md) for state machines, approval sequence and Phase 0 boundaries.
 
 ## 60-second quick start
 
-Requirements: Python 3.11+, Node.js 24+, and PowerShell on Windows.
+要求：Windows、Docker Desktop、Python 3.11+、Node.js 24+ 和 PowerShell。Compose 只绑定本机：Web 为 `127.0.0.1:5173`，API 为 `127.0.0.1:8000`，PostgreSQL 不发布宿主机端口。
 
 ```powershell
 Set-Location apps/api
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
 Set-Location ..\web
-npm ci
+npm.cmd ci
 Set-Location ..\..
-.\scripts\start-local.ps1 -Provider mock
+.\scripts\setup-local.ps1
 ```
 
-Open [http://localhost:5173](http://localhost:5173). Mock mode is the default and requires no API key. Stop the local child processes with `./scripts/stop-local.ps1`.
+首次运行先启动 PostgreSQL、执行 `migrate-local.ps1`（调用 Alembic `upgrade head` 并显式使用 Compose 数据库 URL），再启动 API、scheduler、control-worker 和 Web；健康检查通过后才打开中文控制台。bootstrap token 只提示本机文件路径，脚本不会打印 token 内容。Mock mode 不需要 API key。停止服务：`powershell -File .\scripts\stop-local.ps1`。
+
+手动迁移：`powershell -File .\scripts\migrate-local.ps1`。基础设施验收：`powershell -File .\scripts\verify-foundation.ps1`。Windows 前端命令统一使用 `npm.cmd`。
 
 ## Live OpenAI-compatible configuration
 
@@ -82,13 +88,13 @@ Set-Location apps/api
 .\.venv\Scripts\python.exe -m app.evals.runner
 
 Set-Location ..\web
-npm run lint
-npm run typecheck
-npm test -- --run
-npm run build
+npm.cmd run lint
+npm.cmd run typecheck
+npm.cmd test -- --run
+npm.cmd run build
 npx playwright install chromium
 $env:AGENTGATE_E2E_PYTHON = "..\api\.venv\Scripts\python.exe"
-npm run test:e2e
+npm.cmd run test:e2e
 ```
 
 The deterministic evaluator covers exactly six cases and reports four graders per case: outcome, trajectory, policy compliance and idempotency. The local acceptance run reports `6 cases × 4/4 PASS`; the command writes the ignored `apps/api/eval-results.json` machine-readable report.
@@ -96,20 +102,20 @@ The deterministic evaluator covers exactly six cases and reports four graders pe
 ## Project structure
 
 ```text
-apps/api/       FastAPI app, SQLite models, tools, policy, runner, evals
+apps/api/       FastAPI app, PostgreSQL migrations, durable queue, tools, policy, runner
 apps/web/       React/Vite control console and Playwright flow
 docs/           architecture and deterministic demo script
-scripts/        native local start, stop and verification commands
-compose.yaml    API + nginx production-like local packaging
+scripts/        local Compose start, migration, setup and verification commands
+compose.yaml    PostgreSQL + API + scheduler + control-worker + Web packaging
 ```
 
-## Production evolution
+## Phase 0 boundary
 
-Move persistence to PostgreSQL with migrations, use authenticated actors and RBAC, add durable event delivery, distributed action leases, a secret manager, versioned policies, isolated tool workers, provider telemetry, and tenant isolation. Keep the policy/executor boundary independent of the chosen model provider.
+Phase 0 的 Compose 可靠底座只执行只读检查、认证、持久化队列、迁移和 Worker self-check；API 不直接操作 Windows 宿主机，且不存在真实服务重启、任意 Shell、任意 PowerShell、文件写入或密钥操作。高权限能力只预留给后续原生 Windows Worker 阶段。
 
 ## Tradeoffs and limitations
 
-The MVP intentionally uses one AgentRunner, SQLite, a process-local event broker, two simulated services and a deterministic mock provider. There is no authentication, multi-tenant isolation or real infrastructure handler. These constraints keep the interview demo reproducible and make safety behavior inspectable; they are not production readiness claims.
+当前实现使用单用户认证、PostgreSQL/Alembic、持久化 Outbox、控制 Worker、原生 Worker 协议和 deterministic mock provider；没有真实基础设施 handler。模型提供方可选，禁用模型时控制平面仍可启动。
 
 ## Demo walkthrough
 

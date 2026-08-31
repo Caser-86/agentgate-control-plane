@@ -1,0 +1,41 @@
+from fastapi.testclient import TestClient
+
+from tests.conftest import authenticate_client
+
+
+def test_platform_health_distinguishes_worker_and_target_health(
+    auth_client: tuple[TestClient, object, object]
+) -> None:
+    client, _, token_file = auth_client
+    authenticate_client(client, token_file)
+
+    response = client.get("/api/platform/health")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert set(body["checks"]) >= {"api", "database", "queue", "outbox", "worker"}
+    for check in body["checks"].values():
+        assert set(check) >= {"status", "code", "message_zh", "observed_at", "details"}
+        assert len(check["details"]) <= 10
+        assert "token" not in str(check).lower()
+
+
+def test_platform_self_check_exposes_bounded_operational_metadata_without_secrets(
+    auth_client: tuple[TestClient, object, object]
+) -> None:
+    client, _, token_file = auth_client
+    authenticate_client(client, token_file)
+
+    response = client.get("/api/platform/self-check")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert {
+        "migration_head",
+        "queue_latency_ms",
+        "worker_heartbeat_age_seconds",
+        "provider",
+    } <= set(body)
+    assert body["provider"]["name"]
+    assert "api_key" not in response.text
+    assert "bootstrap" not in response.text.lower()

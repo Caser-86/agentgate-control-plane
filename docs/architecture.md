@@ -10,7 +10,9 @@ flowchart LR
     API[FastAPI API]
     Runner[AgentRunner]
     Policy[PolicyEngine]
-    DB[(SQLite)]
+    DB[(PostgreSQL)]
+    Scheduler[scheduler]
+    ControlWorker[control-worker]
     Executor[ToolExecutor]
     Tools[Allowlisted tools]
     LLM[Mock or OpenAI-compatible LLM]
@@ -24,6 +26,8 @@ flowchart LR
     Runner --> Executor
     Executor --> Tools
     Executor --> DB
+    Scheduler --> DB
+    ControlWorker --> DB
 ```
 
 The API owns run creation, detail reads, approvals, audit queries and the SSE stream. `AgentRunner` is the single stateful orchestration boundary: it loads a checkpoint, calls the provider-neutral LLM interface, validates tool arguments, routes through policy, and resumes after an approval decision.
@@ -104,10 +108,10 @@ sequenceDiagram
 ## Why these choices
 
 - **SSE:** run events are append-only and server-to-browser, so SSE keeps the console simple while still showing persisted state changes promptly. REST remains the source of truth after reconnect.
-- **SQLite:** it is zero-setup for a local interview demo and makes checkpoints and audit history inspectable. Production should move to PostgreSQL with migrations and concurrent worker coordination.
+- **PostgreSQL + Alembic:** PostgreSQL is the only source of truth for runs, leases, workers and Outbox events. Compose runs migrations before API/Worker services; `SQLModel.metadata.create_all()` remains test-only.
 - **Direct OpenAI SDK:** the adapter uses the official Python client for OpenAI-compatible chat completions while exposing only provider-neutral `ModelTurn` and `ToolCall` types to the agent loop.
 - **One Agent:** a single runner keeps approval semantics, tool-call ordering and checkpoint recovery unambiguous for the MVP. Specialized agents can be added behind the same policy/executor boundary later.
 
 ## Local-demo limitations and production path
 
-The demo has a deterministic mock provider, two simulated services, one process-local event broker, SQLite persistence, and no authentication or multi-tenant isolation. Tool handlers are intentionally local and do not change real infrastructure. A production evolution would add authenticated actors, RBAC, PostgreSQL migrations, durable event delivery, distributed action leases, secret-manager integration, richer policy versioning, provider observability, and isolated tool workers.
+Phase 0 is deliberately local-only: Compose binds Web/API to loopback, PostgreSQL has no published host port, and no real host action exists. The API exposes health/self-check data without secrets; the scheduler recovers durable leases and the control-worker processes persisted control tasks. The native Windows Worker remains usable outside Docker for the safe `worker.self_check` protocol. Real service restarts, arbitrary shell/PowerShell, file writes and secret operations belong to later phases and are not implemented here.

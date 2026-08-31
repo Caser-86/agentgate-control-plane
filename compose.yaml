@@ -33,6 +33,18 @@ services:
       interval: 5s
       timeout: 3s
       retries: 12
+  scheduler:
+    build: ./apps/api
+    command: ["python", "-m", "app.processes.scheduler"]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      AGENTGATE_DATABASE_URL: postgresql+psycopg://agentgate:${AGENTGATE_POSTGRES_PASSWORD:-agentgate}@postgres:5432/agentgate
+      AGENTGATE_SCHEDULER_ROLE: due-task-enqueue-and-lease-cleanup
+    depends_on:
+      postgres:
+        condition: service_healthy
   control-worker:
     build: ./apps/api
     command: ["python", "-m", "app.processes.control_worker"]
@@ -42,6 +54,7 @@ services:
     environment:
       AGENTGATE_LLM_PROVIDER: ${AGENTGATE_LLM_PROVIDER:-mock}
       AGENTGATE_DATABASE_URL: postgresql+psycopg://agentgate:${AGENTGATE_POSTGRES_PASSWORD:-agentgate}@postgres:5432/agentgate
+      AGENTGATE_WORKER_ROLE: durable-control-task-processor
     depends_on:
       postgres:
         condition: service_healthy

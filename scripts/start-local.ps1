@@ -5,67 +5,37 @@ param(
 
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$apiRoot = Join-Path $repoRoot "apps\api"
-$webRoot = Join-Path $repoRoot "apps\web"
-$stateRoot = Join-Path $repoRoot ".agentgate"
-$apiPidPath = Join-Path $stateRoot "api.pid"
-$webPidPath = Join-Path $stateRoot "web.pid"
-
-if (-not (Test-Path -LiteralPath (Join-Path $repoRoot ".env"))) {
-    $examplePath = Join-Path $repoRoot ".env.example"
-    if (-not (Test-Path -LiteralPath $examplePath)) {
-        throw "Neither .env nor .env.example exists."
-    }
-    Copy-Item -LiteralPath $examplePath -Destination (Join-Path $repoRoot ".env")
-    Write-Host "Created .env from .env.example. Set a newly rotated key before using live mode."
-}
-
-if ((Test-Path -LiteralPath $apiPidPath) -or (Test-Path -LiteralPath $webPidPath)) {
-    throw "AgentGate PID files already exist. Run scripts/stop-local.ps1 first."
-}
-
-New-Item -ItemType Directory -Force -Path $stateRoot | Out-Null
-New-Item -ItemType Directory -Force -Path (Join-Path $apiRoot "data") | Out-Null
-
-$pythonPath = Join-Path $apiRoot ".venv\Scripts\python.exe"
-if (-not (Test-Path -LiteralPath $pythonPath)) {
-    $pythonPath = (Get-Command python -ErrorAction Stop).Source
-}
-$nodePath = (Get-Command node -ErrorAction Stop).Source
-$vitePath = Join-Path $webRoot "node_modules\vite\bin\vite.js"
-if (-not (Test-Path -LiteralPath $vitePath)) {
-    throw "Vite is not installed. Run npm ci in apps/web first."
-}
-
+Set-Location $repoRoot
 $env:AGENTGATE_LLM_PROVIDER = $Provider
-$env:AGENTGATE_DATABASE_URL = "sqlite:///./data/agentgate.db"
-$env:AGENTGATE_WEB_ORIGIN = "http://localhost:5173"
 
-$apiArguments = "-m uvicorn app.main:app --host 127.0.0.1 --port 8000 --app-dir `"$apiRoot`""
-$webArguments = "`"$vitePath`" --host localhost --port 5173"
-$apiProcess = Start-Process -FilePath $pythonPath -ArgumentList $apiArguments -WorkingDirectory $apiRoot -WindowStyle Hidden -PassThru
-$webProcess = Start-Process -FilePath $nodePath -ArgumentList $webArguments -WorkingDirectory $webRoot -WindowStyle Hidden -PassThru
+if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+    throw "Docker Desktop is required for the Compose foundation."
+}
 
-Set-Content -LiteralPath $apiPidPath -Value $apiProcess.Id -NoNewline
-Set-Content -LiteralPath $webPidPath -Value $webProcess.Id -NoNewline
-
-$deadline = (Get-Date).AddSeconds(30)
+Write-Host "Starting PostgreSQL for the local migration prerequisite..."
+docker compose up -d postgres
+$deadline = (Get-Date).AddSeconds(60)
 $ready = $false
 while ((Get-Date) -lt $deadline) {
+    docker compose exec -T postgres pg_isready -U agentgate -d agentgate 2>$null
+    if ($LASTEXITCODE -eq 0) { $ready = $true; break }
+    Start-Sleep -Seconds 2
+}
+if (-not $ready) { throw "PostgreSQL did not become ready within 60 seconds." }
+
+& (Join-Path $PSScriptRoot "migrate-local.ps1")
+if ($LASTEXITCODE -ne 0) { throw "Database migration failed." }
+
+Write-Host "Starting API, scheduler, control-worker and web..."
+docker compose up -d api scheduler control-worker web
+$deadline = (Get-Date).AddSeconds(60)
+$healthy = $false
+while ((Get-Date) -lt $deadline) {
     try {
-        $health = Invoke-RestMethod -Uri "http://localhost:8000/health" -TimeoutSec 2
-        if ($health.status -eq "ok") {
-            $ready = $true
-            break
-        }
-    } catch {
-        Start-Sleep -Milliseconds 500
-    }
+        $response = Invoke-RestMethod -Uri "http://127.0.0.1:8000/health" -TimeoutSec 2
+        if ($response.status -eq "ok") { $healthy = $true; break }
+    } catch { Start-Sleep -Seconds 2 }
 }
-
-if (-not $ready) {
-    Write-Error "AgentGate API did not become healthy within 30 seconds."
-    exit 1
-}
-
-Write-Host "AgentGate is ready at http://localhost:5173 (provider: $Provider)"
+if (-not $healthy) { throw "AgentGate API did not become healthy within 60 seconds." }
+Write-Host "AgentGate foundation is ready at http://localhost:5173 (provider: $Provider)."
+Write-Host "Frontend development commands must use npm.cmd on Windows."
