@@ -82,8 +82,10 @@ async def stream_outbox_events(
     cursor: int,
     resource_id: UUID | None,
     poll_interval: float = POLL_INTERVAL_SECONDS,
+    max_events: int | None = None,
 ) -> AsyncIterator[str]:
     current_cursor = max(cursor, 0)
+    delivered = 0
     loop = asyncio.get_running_loop()
     next_heartbeat = loop.time() + HEARTBEAT_SECONDS
     while True:
@@ -97,6 +99,9 @@ async def stream_outbox_events(
                     continue
                 current_cursor = event.sequence
                 yield format_outbox_sse(event)
+                delivered += 1
+                if max_events is not None and delivered >= max_events:
+                    return
             continue
         now = loop.time()
         if now >= next_heartbeat:

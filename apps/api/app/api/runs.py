@@ -11,7 +11,7 @@ from sqlmodel import Session
 from app.auth.dependencies import require_csrf, require_operator
 from app.auth.models import Operator
 from app.config import get_settings
-from app.db import get_engine, get_session
+from app.db import get_session
 from app.models import AgentRun, AuditEvent, ToolAction
 from app.repositories import ActionRepository, AuditRepository, RunRepository
 from app.schemas import (
@@ -22,7 +22,7 @@ from app.schemas import (
     ToolActionResponse,
 )
 from app.services.audit import redact
-from app.services.outbox import effective_cursor, stream_outbox_events
+from app.services.outbox import MAX_EVENT_BATCH, effective_cursor, stream_outbox_events
 from app.services.runs import RunService
 
 router = APIRouter(prefix="/api/runs", tags=["runs"])
@@ -126,8 +126,13 @@ def get_run(run_id: UUID, session: SessionDep, _: OperatorDep) -> RunDetailRespo
     )
 
 
-def stream_run_events(run_id: UUID, cursor: int) -> AsyncIterator[str]:
-    return stream_outbox_events(lambda: Session(get_engine()), cursor=cursor, resource_id=run_id)
+def stream_run_events(
+    run_id: UUID, cursor: int, session: Session, limit: int | None = None
+) -> AsyncIterator[str]:
+    bind = session.get_bind()
+    return stream_outbox_events(
+        lambda: Session(bind), cursor=cursor, resource_id=run_id, max_events=limit
+    )
 
 
 @router.get("/{run_id}/events")
@@ -137,6 +142,7 @@ async def run_events(
     _: OperatorDep,
     after: Annotated[str | None, Query()] = None,
     last_event_id: Annotated[str | None, Header()] = None,
+    limit: Annotated[int | None, Query(ge=1, le=MAX_EVENT_BATCH)] = None,
 ) -> StreamingResponse:
     if RunRepository(session).get(run_id) is None:
         raise HTTPException(
@@ -144,7 +150,12 @@ async def run_events(
             detail={"code": "not_found", "message": "run was not found"},
         )
     return StreamingResponse(
-        stream_run_events(run_id, effective_cursor(last_event_id=last_event_id, after=after)),
+        stream_run_events(
+            run_id,
+            effective_cursor(last_event_id=last_event_id, after=after),
+            session,
+            limit,
+        ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

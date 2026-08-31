@@ -1,7 +1,7 @@
 import asyncio
 import json
 from collections.abc import AsyncIterator
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -52,62 +52,6 @@ async def test_run_stream_reconnects_after_last_event_id() -> None:
     )
 
     assert frames == ['id: 3\nevent: run.updated\ndata: {"status": "completed"}\n\n']
-
-
-@pytest.mark.asyncio
-async def test_run_endpoint_replays_approved_action_events_without_duplicates(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from app.api import runs as runs_api
-    from app.auth.models import Operator
-    from app.db import create_db_and_tables, create_db_engine, seed_demo_state
-    from app.services.outbox import read_events_after
-
-    engine = create_db_engine("sqlite://")
-    create_db_and_tables(engine)
-    with Session(engine) as session:
-        seed_demo_state(session)
-        run = RunRepository(session).create("Inspect payments", "mock", "mock")
-        action = ToolAction(
-            run_id=run.id,
-            tool_call_id="approved-call",
-            tool_name="get_service_health",
-            risk_level=RiskLevel.LOW,
-            policy_decision=PolicyDecision.REQUIRE_APPROVAL,
-            status=ActionStatus.APPROVED,
-            arguments_json=json.dumps({"service": "payments-api"}),
-            reason="approved by operator",
-            idempotency_key="approved-action-event",
-        )
-        session.add(action)
-        session.commit()
-        await ToolExecutor(session).execute(action.id)
-
-        monkeypatch.setattr(runs_api, "get_engine", lambda: engine)
-        response = await runs_api.run_events(
-            run.id,
-            session,
-            Operator(password_hash="test-only"),
-            after="0",
-        )
-        frames = await asyncio.wait_for(_take(response.body_iterator, 2), timeout=0.1)
-        event_ids = [int(frame.split("\n", 1)[0].removeprefix("id: ")) for frame in frames]
-
-        replay = await runs_api.run_events(
-            run.id,
-            session,
-            Operator(password_hash="test-only"),
-            after=str(event_ids[1]),
-            last_event_id=str(event_ids[0]),
-        )
-        replayed = await asyncio.wait_for(_take(replay.body_iterator, 1), timeout=0.1)
-        persisted = read_events_after(session, cursor=0, resource_id=run.id, limit=10)
-
-    assert event_ids == sorted(event_ids)
-    assert len(event_ids) == len(set(event_ids))
-    assert all("event: action.updated" in frame for frame in frames)
-    assert f'id: {event_ids[1]}\n' in replayed[0]
-    assert [event.sequence for event in persisted] == event_ids
 
 
 @pytest.mark.asyncio
@@ -179,11 +123,9 @@ def test_http_sse_stream_has_durable_event_headers(
 
 
 def test_http_run_stream_replays_approved_action_events_from_database(
-    monkeypatch: pytest.MonkeyPatch, auth_client: tuple[TestClient, object, object]
+    auth_client: tuple[TestClient, object, object]
 ) -> None:
     client, engine, token_file = auth_client
-    from app.api import runs as runs_api
-    from app.services.outbox import stream_outbox_events
 
     with Session(engine) as session:
         seed_demo_state(session)
@@ -204,38 +146,29 @@ def test_http_run_stream_replays_approved_action_events_from_database(
         asyncio.run(ToolExecutor(session).execute(action.id))
         run_id, action_id = run.id, action.id
 
-    async def finite_database_stream(run_id: UUID, cursor: int) -> AsyncIterator[str]:
-        stream = stream_outbox_events(
-            lambda: Session(engine), resource_id=run_id, cursor=cursor, poll_interval=0.01
-        )
-        frame_count = 2 if cursor == 0 else 1
-        try:
-            for _ in range(frame_count):
-                yield await anext(stream)
-        finally:
-            await stream.aclose()
-
-    monkeypatch.setattr(runs_api, "stream_run_events", finite_database_stream)
     authenticate_client(client, token_file)
-    first = client.get(f"/api/runs/{run_id}/events?after=0")
+    with client.stream("GET", f"/api/runs/{run_id}/events?after=0&limit=2") as first:
+        first_body = "\n".join(first.iter_lines())
     first_ids = [
         int(line.removeprefix("id: "))
-        for line in first.text.splitlines()
+        for line in first_body.splitlines()
         if line.startswith("id: ")
     ]
-    replay = client.get(
-        f"/api/runs/{run_id}/events?after={first_ids[1]}",
+    with client.stream(
+        "GET",
+        f"/api/runs/{run_id}/events?after={first_ids[1]}&limit=1",
         headers={"Last-Event-ID": str(first_ids[0])},
-    )
+    ) as replay:
+        replay_body = "\n".join(replay.iter_lines())
 
     assert first.status_code == 200
     assert first_ids == sorted(first_ids)
-    assert first.text.count(str(action_id)) == 2
-    assert '"status": "running"' in first.text
-    assert '"status": "succeeded"' in first.text
-    assert replay.text.count(str(action_id)) == 1
-    assert f"id: {first_ids[1]}" in replay.text
-    assert '"status": "succeeded"' in replay.text
+    assert first_body.count(str(action_id)) == 2
+    assert '"status": "running"' in first_body
+    assert '"status": "succeeded"' in first_body
+    assert replay_body.count(str(action_id)) == 1
+    assert f"id: {first_ids[1]}" in replay_body
+    assert '"status": "succeeded"' in replay_body
 
 
 def test_generic_events_stream_accepts_events_without_run_id(

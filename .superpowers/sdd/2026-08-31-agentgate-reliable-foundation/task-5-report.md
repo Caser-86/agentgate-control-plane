@@ -32,3 +32,11 @@ Task 6 request-bound `BackgroundTasks` behavior was intentionally retained; no W
 - The first request replays the action `running` and `succeeded` frames. A second HTTP request sends both `Last-Event-ID` and `after`; it replays only the next persisted sequence, proving run-scoped cursor recovery does not duplicate the action event.
 - Focused command: `python -m pytest tests/test_sse.py tests/test_outbox_stream.py tests/test_executor.py -q` — 18 passed.
 - Static commands: `python -m ruff check app tests` and `python -m mypy app` — passed.
+
+## Fix Round 3
+
+- Replaced the prior monkeypatched stream regression with a true `TestClient.stream()` test. It creates the run and approved action in the fixture database, invokes the real executor, and reads the real `/api/runs/{run_id}/events` route and production Outbox stream without replacing either function.
+- The run route now resolves the database bind from its request session, ensuring its production stream reads the same database selected by the route dependency. An optional bounded `limit` provides a normal finite SSE response for clients that request it; the default production stream remains open and heartbeating.
+- The HTTP test reads two action frames, closes the first stream context, then reconnects with both `Last-Event-ID` and `after` to read exactly the unconsumed event.
+- Focused command: `python -m pytest tests/test_sse.py tests/test_outbox_stream.py tests/test_executor.py -q` — 17 passed.
+- Static commands: `python -m ruff check app tests` and `python -m mypy app` — passed.
