@@ -2,8 +2,9 @@ import asyncio
 import json
 
 import pytest
-from sqlmodel import Session
+from sqlmodel import Session, select
 
+from app.control.models import OutboxEvent
 from app.db import create_db_and_tables, create_db_engine, seed_demo_state
 from app.llm.mock import MockLLMProvider
 from app.models import ActionStatus, AgentRun, RunStatus, ServiceState
@@ -74,6 +75,15 @@ async def test_deny_records_denial_without_handler_and_resumes(session: Session)
     assert json.loads(saved.result_json or "{}")["denied"] is True
     assert session.get(ServiceState, "payments-api").restart_count == 0
     assert session.get(AgentRun, run_id).status == RunStatus.COMPLETED
+    denial_events = [
+        event
+        for event in session.exec(
+            select(OutboxEvent).where(OutboxEvent.resource_id == run_id)
+        ).all()
+        if event.event_type == "action.updated"
+        and event.payload.get("action_id") == str(action.id)
+    ]
+    assert len(denial_events) == 2
 
 
 @pytest.mark.asyncio

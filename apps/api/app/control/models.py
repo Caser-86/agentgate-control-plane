@@ -19,6 +19,7 @@ class ControlTask(SQLModel, table=True):
     idempotency_key: str = Field(unique=True, index=True)
     run_id: UUID | None = Field(default=None, foreign_key="agent_runs.id", index=True)
     attempts: int = 0
+    lease_version: int = 0
     available_at: datetime = Field(default_factory=utc_now, index=True)
     lease_owner_id: UUID | None = Field(default=None, index=True)
     lease_expires_at: datetime | None = Field(default=None, index=True)

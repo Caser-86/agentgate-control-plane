@@ -2,9 +2,10 @@
 
 import asyncio
 import logging
+import threading
 import time
 from collections.abc import Callable
-from datetime import datetime
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from sqlalchemy.engine import Engine
@@ -13,12 +14,19 @@ from sqlmodel import Session
 from app.config import Settings, get_settings
 from app.control.enums import TaskKind, TaskOutcome, TaskStatus
 from app.control.models import ControlTask
-from app.control.repositories import append_outbox_event, claim_next_task, complete_task
+from app.control.repositories import (
+    append_outbox_event,
+    claim_next_task,
+    complete_task,
+    renew_task_lease,
+    start_task,
+)
 from app.db import get_engine
 from app.models import RunStatus
 from app.repositories import AuditRepository, RunRepository
 from app.services.agent_loop import AgentRunner
 from app.services.audit import AuditService
+from app.services.executor import ExecutionLeaseLostError
 from app.services.runs import build_provider
 
 logger = logging.getLogger(__name__)
@@ -69,11 +77,19 @@ class ControlWorker:
             if not self._is_agent_run_task(task):
                 self._finish_invalid_task(session, task)
                 return 1
-            task.status = TaskStatus.RUNNING
-            session.add(task)
+            lease_version = task.lease_version
+            if not start_task(
+                session,
+                task_id=task.id,
+                worker_id=self.worker_id,
+                lease_version=lease_version,
+                now=self._now(),
+            ):
+                self._finish_lost_lease(session, task)
+                return 1
             session.commit()
 
-        self._execute_run_task(task_id)
+        self._execute_run_task(task_id, lease_version)
         return 1
 
     def run_forever(self) -> None:
@@ -114,13 +130,34 @@ class ControlWorker:
             run_timeout_seconds=self.settings.run_timeout_seconds,
         )
 
-    def _execute_run_task(self, task_id: UUID) -> None:
+    def _execute_run_task(self, task_id: UUID, lease_version: int) -> None:
+        lost = threading.Event()
+        stop = threading.Event()
+
+        def heartbeat() -> None:
+            interval = max(0.05, self.settings.worker_lease_seconds / 3)
+            while not stop.wait(interval):
+                try:
+                    self._renew(task_id)
+                except ValueError:
+                    lost.set()
+                    return
+
+        def before_side_effect() -> None:
+            self._renew(task_id)
+
         with Session(self.engine) as session:
             task = session.get(ControlTask, task_id)
             if task is None or task.run_id is None:
                 return
+            runner = self._runner(session)
+            runner.executor.before_side_effect = before_side_effect
+            heartbeat_thread = threading.Thread(target=heartbeat, daemon=True)
+            heartbeat_thread.start()
             try:
-                asyncio.run(self._runner(session).resume_run(task.run_id))
+                asyncio.run(runner.resume_run(task.run_id))
+                if lost.is_set():
+                    raise ValueError("task lease was lost during execution")
                 run = RunRepository(session).get(task.run_id)
                 if run is None:
                     self._finish_invalid_task(session, task)
@@ -133,6 +170,7 @@ class ControlWorker:
                     session,
                     task_id=task.id,
                     worker_id=self.worker_id,
+                    lease_version=lease_version,
                     outcome=outcome,
                     result=result,
                 )
@@ -151,14 +189,47 @@ class ControlWorker:
                     commit=False,
                 )
                 session.commit()
-            except ValueError:
+            except (ValueError, ExecutionLeaseLostError):
                 # A lease may have elapsed while a run was in progress.  The queue's
                 # existing recovery path will requeue read-only work or require manual
                 # review for possible side effects; never execute it a second time here.
                 session.rollback()
+                self._finish_lost_lease(session, task)
             except Exception:
                 session.rollback()
                 logger.exception("control_worker_task_failed")
+            finally:
+                stop.set()
+                heartbeat_thread.join(timeout=1)
+
+    def _renew(self, task_id: UUID) -> None:
+        with Session(self.engine) as session:
+            renew_task_lease(session, task_id=task_id, worker_id=self.worker_id, now=self._now())
+            session.commit()
+
+    def _finish_lost_lease(self, session: Session, task: ControlTask) -> None:
+        latest = session.get(ControlTask, task.id)
+        if latest is None or latest.lease_expires_at is None:
+            return
+        expiry = latest.lease_expires_at
+        if expiry.tzinfo is None:
+            expiry = expiry.replace(tzinfo=UTC)
+        if expiry > self._now():
+            return
+        latest.status = TaskStatus.MANUAL_REVIEW
+        latest.error_class = "control_task_lease_lost"
+        latest.completed_at = self._now()
+        latest.lease_owner_id = None
+        latest.lease_expires_at = None
+        session.add(latest)
+        append_outbox_event(
+            session,
+            event_type="task.updated",
+            resource_type="task",
+            resource_id=latest.id,
+            payload={"status": latest.status.value, "error": latest.error_class},
+        )
+        session.commit()
 
     def _finish_invalid_task(self, session: Session, task: ControlTask) -> None:
         task.status = TaskStatus.MANUAL_REVIEW

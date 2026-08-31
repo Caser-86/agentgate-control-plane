@@ -108,23 +108,12 @@ class ApprovalService:
             action.id,
             commit=False,
         )
-        self._emit(
-            action.run_id,
-            "action.updated",
-            {"action_id": str(action.id), "status": action.status.value},
-        )
-
         if decision is ApprovalDecision.DENIED:
             action.result_json = json.dumps(
                 {"denied": True, "reason": action.reason}, ensure_ascii=False
             )
             action.executed_at = datetime.now(UTC)
             self.session.add(action)
-            self._emit(
-                action.run_id,
-                "action.updated",
-                {"action_id": str(action.id), "status": action.status.value},
-            )
             self.audit.append(
                 action.run_id,
                 "tool.denied",
@@ -149,6 +138,17 @@ class ApprovalService:
             )
             self.run_repository.save_checkpoint(
                 action.run_id, messages, run.step_count, commit=False
+            )
+            self._emit(
+                action.run_id,
+                "action.updated",
+                {"action_id": str(action.id), "status": action.status.value},
+            )
+        else:
+            self._emit(
+                action.run_id,
+                "action.updated",
+                {"action_id": str(action.id), "status": action.status.value},
             )
         task = enqueue_task(
             self.session,

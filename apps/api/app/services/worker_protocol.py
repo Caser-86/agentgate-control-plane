@@ -345,6 +345,7 @@ def complete_worker_task(
             session,
             task_id=task_id,
             worker_id=worker_id,
+            lease_version=task.lease_version,
             outcome=TaskOutcome.SUCCEEDED,
             result=safe_result,
         )

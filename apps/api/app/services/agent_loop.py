@@ -1,6 +1,6 @@
 import asyncio
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -19,7 +19,7 @@ from app.models import (
 from app.policy import PolicyEngine
 from app.repositories import ActionRepository, AuditRepository, RunRepository
 from app.services.audit import AuditService
-from app.services.executor import ToolExecutor
+from app.services.executor import ExecutionLeaseLostError, ToolExecutor
 from app.tools.registry import ToolRegistry, UnknownToolError
 
 
@@ -34,6 +34,7 @@ class AgentRunner:
         registry: ToolRegistry | None = None,
         max_steps: int = 8,
         run_timeout_seconds: float = 120,
+        before_side_effect: Callable[[], None] | None = None,
     ) -> None:
         self.session = session
         self.provider = provider
@@ -48,6 +49,7 @@ class AgentRunner:
             session,
             registry=self.registry,
             audit=AuditRepository(session),
+            before_side_effect=before_side_effect,
         )
         self.max_steps = max_steps
         self.run_timeout_seconds = run_timeout_seconds
@@ -83,6 +85,8 @@ class AgentRunner:
                 await self._run(run_id)
         except TimeoutError:
             self._fail_run(run_id, "run exceeded the configured timeout")
+        except ExecutionLeaseLostError:
+            raise
         except Exception:
             self._fail_run(run_id, "run failed safely")
 

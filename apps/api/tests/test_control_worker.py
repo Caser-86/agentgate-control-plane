@@ -10,10 +10,19 @@ from app.control.models import ControlTask, OutboxEvent
 from app.control.repositories import enqueue_task
 from app.db import create_db_and_tables, create_db_engine, seed_demo_state
 from app.llm.base import ModelTurn
-from app.models import AgentRun, RunStatus, utc_now
+from app.models import (
+    ActionStatus,
+    AgentRun,
+    PolicyDecision,
+    RiskLevel,
+    RunStatus,
+    ToolAction,
+    utc_now,
+)
 from app.processes.control_worker import ControlWorker
-from app.repositories import RunRepository
+from app.repositories import ActionRepository, RunRepository
 from app.services.agent_loop import AgentRunner
+from app.tools.registry import RegisteredTool, ToolRegistry
 from tests.conftest import authenticate_client
 
 
@@ -90,6 +99,100 @@ def test_expired_possible_run_task_requires_manual_review_instead_of_reexecution
 
     with Session(engine) as session:
         task = session.get(ControlTask, task_id)
+    assert task is not None
+    assert task.status == TaskStatus.MANUAL_REVIEW
+
+
+def test_worker_does_not_start_task_after_lease_expires_before_running(monkeypatch) -> None:
+    engine = create_db_engine("sqlite://")
+    create_db_and_tables(engine)
+    with Session(engine) as session:
+        run = RunRepository(session).create("inspect service health", "mock", "mock")
+        task = enqueue_task(
+            session,
+            kind=TaskKind.AGENT_RUN,
+            payload={"run_id": str(run.id)},
+            idempotency_key="lease-race-before-running",
+            capability="control.run",
+            run_id=run.id,
+        )
+        session.commit()
+        task_id = task.id
+
+    worker = ControlWorker(engine, runner_factory=lambda _session: (_ for _ in ()).throw(
+        AssertionError("expired task must not execute")
+    ))
+    claim_time = utc_now()
+    expired = claim_time + timedelta(seconds=31)
+    times = iter((claim_time, expired, expired, expired))
+    monkeypatch.setattr(worker, "_now", lambda: next(times))
+    assert worker.run_once() == 1
+
+    with Session(engine) as session:
+        task = session.get(ControlTask, task_id)
+    assert task is not None
+    assert task.status == TaskStatus.MANUAL_REVIEW
+
+
+def test_worker_marks_lease_loss_after_possible_side_effect_without_retry() -> None:
+    engine = create_db_engine("sqlite://")
+    create_db_and_tables(engine)
+    calls: list[str] = []
+    worker_id = UUID("00000000-0000-0000-0000-000000000001")
+    other_worker_id = UUID("00000000-0000-0000-0000-000000000002")
+
+    async def handler(_arguments, session: Session) -> dict[str, object]:
+        calls.append("executed")
+        task = session.exec(select(ControlTask)).one()
+        task.lease_owner_id = other_worker_id
+        task.lease_expires_at = utc_now() - timedelta(seconds=1)
+        session.add(task)
+        session.commit()
+        await asyncio.sleep(0.1)
+        return {"ok": True}
+
+    registry = ToolRegistry()
+    registered = registry.get("restart_service")
+    registry.replace(
+        "restart_service",
+        RegisteredTool(registered.spec, registered.arguments_model, handler),
+    )
+    with Session(engine) as session:
+        run = RunRepository(session).create("approved restart", "mock", "mock")
+        action = ToolAction(
+            run_id=run.id,
+            tool_call_id="call-1",
+            tool_name="restart_service",
+            risk_level=RiskLevel.MEDIUM,
+            policy_decision=PolicyDecision.REQUIRE_APPROVAL,
+            status=ActionStatus.APPROVED,
+            arguments_json='{"service":"payments-api","reason":"test reason"}',
+            reason="approved",
+            idempotency_key="lease-loss-action",
+        )
+        ActionRepository(session).create(action, commit=False)
+        task = enqueue_task(
+            session,
+            kind=TaskKind.AGENT_RUN,
+            payload={"run_id": str(run.id)},
+            idempotency_key="lease-loss-side-effect",
+            capability="control.run",
+            run_id=run.id,
+            side_effect_certainty=SideEffectCertainty.POSSIBLE,
+        )
+        session.commit()
+        task_id = task.id
+
+    def runner_factory(session: Session) -> AgentRunner:
+        return AgentRunner(session, provider=SlowProvider(), registry=registry)
+
+    worker = ControlWorker(engine, worker_id=worker_id, runner_factory=runner_factory)
+    assert worker.run_once() == 1
+
+    with Session(engine) as session:
+        task = session.get(ControlTask, task_id)
+        action = session.exec(select(ToolAction)).one()
+    assert calls == ["executed"]
     assert task is not None
     assert task.status == TaskStatus.MANUAL_REVIEW
 

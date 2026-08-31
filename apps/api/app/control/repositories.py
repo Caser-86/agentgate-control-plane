@@ -2,7 +2,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 from uuid import UUID, uuid4
 
-from sqlalchemy import or_
+from sqlalchemy import or_, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlmodel import Session, select
 
@@ -123,6 +123,7 @@ def claim_next_task(
         session.flush()
         return None
     task.status = TaskStatus.LEASED
+    task.lease_version += 1
     task.lease_owner_id = worker_id
     task.lease_expires_at = now + timedelta(seconds=get_settings().worker_lease_seconds)
     task.started_at = task.started_at or now
@@ -149,9 +150,27 @@ def renew_task_lease(
     return task
 
 
+def start_task(
+    session: Session, *, task_id: UUID, worker_id: UUID, lease_version: int, now: datetime,
+) -> bool:
+    updated = session.execute(
+        update(ControlTask)
+        .where(
+            cast(Any, ControlTask.id) == task_id,
+            cast(Any, ControlTask.lease_owner_id) == worker_id,
+            cast(Any, ControlTask.lease_version) == lease_version,
+            cast(Any, ControlTask.status) == TaskStatus.LEASED,
+            cast(Any, ControlTask.lease_expires_at) > now,
+        )
+        .values(status=TaskStatus.RUNNING, updated_at=now)
+        .execution_options(synchronize_session=False)
+    )
+    return bool(cast(Any, updated).rowcount == 1)
+
+
 def complete_task(
     session: Session, *, task_id: UUID, worker_id: UUID, outcome: TaskOutcome,
-    result: dict[str, object],
+    result: dict[str, object], lease_version: int | None = None,
 ) -> ControlTask:
     task = session.get(ControlTask, task_id)
     if task is None:
@@ -162,6 +181,8 @@ def complete_task(
         TaskStatus.LEASED, TaskStatus.RUNNING
     }:
         raise ValueError("task is not completable by this worker")
+    if lease_version is not None and task.lease_version != lease_version:
+        raise ValueError("task lease version has changed")
     task.status = TaskStatus(outcome.value)
     task.result = result
     task.completed_at = utc_now()

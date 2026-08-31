@@ -1,5 +1,6 @@
 import asyncio
 import json
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import cast
 from uuid import UUID
@@ -26,6 +27,10 @@ class ExecutionNotAllowedError(ExecutionError):
     pass
 
 
+class ExecutionLeaseLostError(ExecutionError):
+    pass
+
+
 class ToolExecutor:
     def __init__(
         self,
@@ -34,12 +39,14 @@ class ToolExecutor:
         registry: ToolRegistry | None = None,
         audit: AuditRepository | None = None,
         timeout_seconds: float = 10,
+        before_side_effect: Callable[[], None] | None = None,
     ) -> None:
         self.session = session
         self.registry = registry or ToolRegistry()
         self.action_repository = ActionRepository(session)
         self.audit = AuditService(audit or AuditRepository(session))
         self.timeout_seconds = timeout_seconds
+        self.before_side_effect = before_side_effect
 
     def _emit(self, action: ToolAction) -> None:
         append_outbox_event(
@@ -89,8 +96,15 @@ class ToolExecutor:
             arguments = self.registry.validate(action.tool_name, cast(dict[str, object], decoded))
             if registered.handler is None:
                 raise ExecutionError("tool has no executable handler")
+            if self.before_side_effect is not None:
+                try:
+                    self.before_side_effect()
+                except Exception as error:
+                    raise ExecutionLeaseLostError from error
             async with asyncio.timeout(self.timeout_seconds):
                 result = await registered.handler(arguments, self.session)
+        except ExecutionLeaseLostError:
+            raise
         except TimeoutError:
             return await self._fail(action_id, "tool execution timed out")
         except (ValidationError, UnknownToolError, ExecutionError, ValueError):
