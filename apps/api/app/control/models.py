@@ -37,12 +37,24 @@ class WorkerRegistration(SQLModel, table=True):
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     name: str = Field(index=True)
     version: str
+    protocol_version: str = Field(default="1.0")
     capabilities: list[str] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
     token_digest: str = Field(unique=True, index=True)
     status: WorkerStatus = Field(default=WorkerStatus.ACTIVE, index=True)
     last_heartbeat_at: datetime | None = Field(default=None, index=True)
     created_at: datetime = Field(default_factory=utc_now, index=True)
     updated_at: datetime = Field(default_factory=utc_now)
+
+
+class WorkerExecutionGrant(SQLModel, table=True):
+    __tablename__ = "worker_execution_grants"
+
+    task_id: UUID = Field(primary_key=True, foreign_key="control_tasks.id")
+    worker_id: UUID = Field(foreign_key="worker_registrations.id", index=True)
+    request_digest: str = Field(index=True)
+    lease_expires_at: datetime = Field(index=True)
+    started_at: datetime = Field(default_factory=utc_now, index=True)
+    completed_at: datetime | None = Field(default=None, index=True)
 
 
 class OutboxEvent(SQLModel, table=True):

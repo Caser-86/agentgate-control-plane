@@ -14,6 +14,7 @@ from app.api.health import router as health_router
 from app.api.policies import router as policies_router
 from app.api.runs import router as runs_router
 from app.api.v1 import router as v1_router
+from app.api.worker import router as worker_router
 from app.auth.security import ensure_bootstrap_token
 from app.config import get_settings
 from app.db import database_schema_is_ready, get_engine, seed_demo_state
@@ -52,6 +53,7 @@ app.include_router(approvals_router)
 app.include_router(audit_router)
 app.include_router(policies_router)
 app.include_router(v1_router)
+app.include_router(worker_router)
 
 
 @app.exception_handler(HTTPException)

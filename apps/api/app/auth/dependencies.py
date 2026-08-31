@@ -9,6 +9,8 @@ from sqlmodel import Session, select
 from app.auth.models import ClientToken, Operator, WebSession
 from app.auth.security import digest_secret, session_is_active
 from app.config import get_settings
+from app.control.enums import WorkerStatus
+from app.control.models import WorkerRegistration
 from app.db import get_session
 from app.models import utc_now
 
@@ -25,6 +27,17 @@ class ClientIdentity:
     @property
     def actor(self) -> str:
         return f"client:{self.token_id}"
+
+
+@dataclass(frozen=True)
+class WorkerIdentity:
+    worker_id: str
+    protocol_version: str
+    capabilities: frozenset[str]
+
+    @property
+    def actor(self) -> str:
+        return f"worker:{self.worker_id}"
 
 
 def _auth_error(status_code: int, code: str) -> HTTPException:
@@ -85,3 +98,20 @@ def require_client_scope(scope: str) -> Callable[[Request, SessionDep], ClientId
         return ClientIdentity(token_id=str(client_token.id), scopes=scopes)
 
     return dependency
+
+
+def require_worker(request: Request, session: SessionDep) -> WorkerIdentity:
+    authorization = request.headers.get("Authorization", "")
+    scheme, separator, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not separator or not token:
+        raise _auth_error(401, "authentication_required")
+    worker = session.exec(
+        select(WorkerRegistration).where(WorkerRegistration.token_digest == digest_secret(token))
+    ).first()
+    if worker is None or worker.status != WorkerStatus.ACTIVE:
+        raise _auth_error(401, "authentication_required")
+    return WorkerIdentity(
+        worker_id=str(worker.id),
+        protocol_version=worker.protocol_version,
+        capabilities=frozenset(worker.capabilities),
+    )
