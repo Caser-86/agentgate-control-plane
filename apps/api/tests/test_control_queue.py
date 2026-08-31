@@ -4,6 +4,7 @@ from uuid import uuid4
 import pytest
 from sqlmodel import Session, select
 
+from app.config import get_settings
 from app.control.enums import SideEffectCertainty, TaskKind, TaskOutcome, TaskStatus
 from app.control.models import OutboxEvent
 from app.control.repositories import (
@@ -128,6 +129,69 @@ def test_postgres_sessions_allow_only_one_worker_to_claim_task(postgres_session_
     assert first is not None
     assert first.id == task.id
     assert second is None
+    session_a.rollback()
+    session_b.rollback()
+
+
+def test_postgres_expired_lease_recovery_requeues_then_allows_one_reclaim(
+    postgres_session_pair,
+) -> None:
+    session_a, session_b = postgres_session_pair
+    original_worker, recovery_worker, reclaim_worker, contender_worker = (
+        uuid4(),
+        uuid4(),
+        uuid4(),
+        uuid4(),
+    )
+    task = enqueue_task(
+        session_a,
+        kind=TaskKind.AGENT_RUN,
+        payload={},
+        idempotency_key="postgres-expired-recovery",
+        capability="control.run",
+    )
+    session_a.commit()
+    claimed_at = task.available_at
+    assert claim_next_task(
+        session_a,
+        worker_id=original_worker,
+        capabilities={"control.run"},
+        now=claimed_at,
+    )
+    session_a.commit()
+
+    expired_at = claimed_at + timedelta(seconds=get_settings().worker_lease_seconds + 1)
+    assert (
+        claim_next_task(
+            session_b,
+            worker_id=recovery_worker,
+            capabilities={"control.run"},
+            now=expired_at,
+        )
+        is None
+    )
+    session_b.commit()
+    session_a.refresh(task)
+    assert task.status == TaskStatus.QUEUED
+    assert task.attempts == 1
+    assert task.available_at > expired_at
+
+    reclaimed = claim_next_task(
+        session_a,
+        worker_id=reclaim_worker,
+        capabilities={"control.run"},
+        now=task.available_at,
+    )
+    contender = claim_next_task(
+        session_b,
+        worker_id=contender_worker,
+        capabilities={"control.run"},
+        now=task.available_at,
+    )
+
+    assert reclaimed is not None
+    assert reclaimed.id == task.id
+    assert contender is None
     session_a.rollback()
     session_b.rollback()
 
