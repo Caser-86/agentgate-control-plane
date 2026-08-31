@@ -9,14 +9,29 @@ from app.models import AuditEvent
 from app.repositories import AuditRepository
 
 REDACTED = "***REDACTED***"
-SENSITIVE_KEYS = {"api_key", "authorization", "token", "secret", "password"}
+SENSITIVE_KEYS = {
+    "api_key",
+    "apikey",
+    "authorization",
+    "access_token",
+    "refresh_token",
+    "client_secret",
+    "private_key",
+    "token",
+    "secret",
+    "password",
+}
+
+
+def is_sensitive_key(key: object) -> bool:
+    return isinstance(key, str) and key.lower().replace("-", "_") in SENSITIVE_KEYS
 
 
 def redact(value: object) -> object:
     if isinstance(value, Mapping):
         return {
             key: REDACTED
-            if isinstance(key, str) and key.lower() in SENSITIVE_KEYS
+            if is_sensitive_key(key)
             else redact(item)
             for key, item in value.items()
         }

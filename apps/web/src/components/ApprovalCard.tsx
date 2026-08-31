@@ -3,7 +3,10 @@ import { ApiError } from "../api/client";
 import type { ToolAction } from "../types";
 import { StatusBadge } from "./StatusBadge";
 
-const secretKeys = new Set(["api_key", "authorization", "token", "secret", "password"]);
+const secretKeys = new Set([
+  "api_key", "apikey", "authorization", "access_token", "refresh_token",
+  "client_secret", "private_key", "token", "secret", "password",
+]);
 
 function safeValue(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(safeValue);

@@ -8,7 +8,7 @@ import { StatusBadge } from "../components/StatusBadge";
 import { useRunEvents } from "../hooks/useRunEvents";
 
 function formatArguments(value: unknown): string {
-  const secretKeys = new Set(["api_key", "authorization", "token", "secret", "password"]);
+  const secretKeys = new Set(["api_key", "apikey", "authorization", "access_token", "refresh_token", "client_secret", "private_key", "token", "secret", "password"]);
   const safe = (item: unknown): unknown => Array.isArray(item) ? item.map(safe) : item && typeof item === "object" ? Object.fromEntries(Object.entries(item).map(([key, child]) => [key, secretKeys.has(key.toLowerCase()) ? "***REDACTED***" : safe(child)])) : item;
   return JSON.stringify(safe(value), null, 2);
 }

@@ -1,7 +1,22 @@
 import { expect, test } from "@playwright/test";
 
-test("approves a degraded-service restart and preserves an auditable trace", async ({ page, browser }) => {
-  await page.goto("/");
+async function login(page: import("@playwright/test").Page): Promise<void> {
+  await page.goto("/login");
+  const setup = page.getByRole("heading", { name: "初始化管理员密码", exact: true });
+  if (await setup.isVisible().catch(() => false)) {
+    const token = process.env.AGENTGATE_E2E_BOOTSTRAP_TOKEN;
+    if (!token) throw new Error("AGENTGATE_E2E_BOOTSTRAP_TOKEN is required for first-run setup");
+    await page.getByRole("textbox", { name: "引导令牌" }).fill(token);
+    await page.getByLabel("管理员密码").fill("fake-e2e-password");
+    await page.getByRole("button", { name: "完成初始化", exact: true }).click();
+  } else {
+    await page.getByLabel("管理员密码").fill("fake-e2e-password");
+    await page.getByRole("button", { name: "登录", exact: true }).click();
+  }
+}
+
+test("rejects a degraded-service restart and preserves an auditable trace", async ({ page, browser }) => {
+  await login(page);
   await expect(page.getByRole("heading", { name: "Runs", exact: true })).toBeVisible();
 
   await page.getByRole("textbox", { name: "Task request" }).fill(
@@ -23,10 +38,10 @@ test("approves a degraded-service restart and preserves an auditable trace", asy
   const waitingBody = await page.locator("body").innerText();
   expect(waitingBody).not.toContain("api_key");
 
-  await approval.getByRole("button", { name: "Approve", exact: true }).click();
-  await expect(page.getByText("Completed", { exact: true }).first()).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByText("approval.approved", { exact: true })).toBeVisible();
-  await expect(page.getByText("tool.succeeded", { exact: true }).first()).toBeVisible();
+  await approval.getByRole("button", { name: "Deny", exact: true }).click();
+  await expect(page.getByText("Denied", { exact: true }).first()).toBeVisible({ timeout: 15_000 });
+  await page.reload();
+  await expect(page.getByText("approval.denied", { exact: true })).toBeVisible();
 
   const runId = page.url().split("/").pop();
   expect(runId).toBeTruthy();
