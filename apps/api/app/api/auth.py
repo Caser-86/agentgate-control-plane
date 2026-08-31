@@ -33,7 +33,9 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 SessionDep = Annotated[Session, Depends(get_session)]
 OperatorDep = Annotated[Operator, Depends(require_operator)]
 CsrfOperatorDep = Annotated[Operator, Depends(require_csrf)]
-ALLOWED_CLIENT_SCOPES = frozenset({"propose:events", "propose:checks", "propose:actions"})
+ALLOWED_CLIENT_SCOPES = frozenset(
+    {"propose:events", "propose:checks", "propose:actions", "worker:enroll"}
+)
 
 
 def _error(status_code: int, code: str) -> HTTPException:
