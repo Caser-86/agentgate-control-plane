@@ -1,5 +1,6 @@
 import os
 from collections.abc import Generator
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
@@ -105,3 +106,46 @@ def test_baseline_migration_creates_each_postgres_enum_once(
         assert sql.count(f"CREATE TYPE {enum_name}") == 1
     assert "uq_tool_actions_idempotency_key" not in sql
     assert sql.count("CREATE UNIQUE INDEX ix_tool_actions_idempotency_key") == 1
+
+
+def test_bootstrap_issuance_migration_deduplicates_historical_rows(postgres_url: str) -> None:
+    config = Config(str(Path(__file__).parents[1] / "alembic.ini"))
+    config.set_main_option("sqlalchemy.url", postgres_url)
+    command.upgrade(config, "0003_auth_tables")
+    active_id = uuid4()
+    expired_id = uuid4()
+    now = datetime.now(UTC)
+    engine = create_engine(postgres_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO bootstrap_tokens
+                        (id, token_digest, expires_at, consumed_at, created_at)
+                    VALUES
+                        (:active_id, :active_digest, :active_expires, NULL, :created_at),
+                        (:expired_id, :expired_digest, :expired_expires, NULL, :created_at)
+                    """
+                ),
+                {
+                    "active_id": active_id,
+                    "active_digest": "digest-placeholder-active",
+                    "active_expires": now + timedelta(minutes=5),
+                    "expired_id": expired_id,
+                    "expired_digest": "digest-placeholder-expired",
+                    "expired_expires": now - timedelta(minutes=5),
+                    "created_at": now,
+                },
+            )
+        command.upgrade(config, "head")
+        with engine.connect() as connection:
+            rows = connection.execute(
+                text("SELECT id, issuance_key FROM bootstrap_tokens ORDER BY issuance_key")
+            ).all()
+
+        assert len(rows) == 2
+        assert len({row.issuance_key for row in rows}) == 2
+        assert next(row.issuance_key for row in rows if row.id == active_id) == "bootstrap"
+    finally:
+        engine.dispose()

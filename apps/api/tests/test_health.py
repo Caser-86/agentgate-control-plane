@@ -13,16 +13,6 @@ app = main.app
 def test_health_returns_service_status() -> None:
     response = TestClient(app).get("/health")
 
-    assert response.status_code == 401
-
-
-def test_health_returns_service_status_to_authenticated_operator(
-    auth_client: tuple[TestClient, object, object]
-) -> None:
-    client, _, token_file = auth_client
-    authenticate_client(client, token_file)
-    response = client.get("/health")
-
     assert response.status_code == 200
     assert response.json() == {"status": "ok", "service": "agentgate-api"}
 

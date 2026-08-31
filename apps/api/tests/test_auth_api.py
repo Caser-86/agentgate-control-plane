@@ -1,3 +1,4 @@
+import re
 from collections.abc import Generator
 from datetime import timedelta
 from pathlib import Path
@@ -73,6 +74,8 @@ def test_setup_consumes_bootstrap_hashes_password_and_sets_strict_cookie(
         assert operator.password_hash != "password-placeholder"
         assert verify_password(operator.password_hash, "password-placeholder")
         assert stored_bootstrap.token_digest != bootstrap_token
+        assert re.fullmatch(r"[0-9a-f]{64}", stored_bootstrap.token_digest)
+    assert not token_file.exists()
 
 
 def test_bootstrap_token_is_expired_or_consumed_once(

@@ -20,15 +20,40 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     op.add_column(
         "bootstrap_tokens",
-        sa.Column("issuance_key", sa.String(), nullable=False, server_default="bootstrap"),
+        sa.Column("issuance_key", sa.String(), nullable=True),
     )
+    op.execute(
+        """
+        WITH ranked AS (
+            SELECT id,
+                ROW_NUMBER() OVER (
+                    ORDER BY
+                        CASE
+                            WHEN consumed_at IS NULL AND expires_at > CURRENT_TIMESTAMP THEN 0
+                            ELSE 1
+                        END,
+                        expires_at DESC,
+                        created_at DESC,
+                        id
+                ) AS row_number
+            FROM bootstrap_tokens
+        )
+        UPDATE bootstrap_tokens AS token
+        SET issuance_key = CASE
+            WHEN ranked.row_number = 1 THEN 'bootstrap'
+            ELSE 'legacy-' || token.id::text
+        END
+        FROM ranked
+        WHERE token.id = ranked.id
+        """
+    )
+    op.alter_column("bootstrap_tokens", "issuance_key", nullable=False)
     op.create_index(
         "ix_bootstrap_tokens_issuance_key",
         "bootstrap_tokens",
         ["issuance_key"],
         unique=True,
     )
-    op.alter_column("bootstrap_tokens", "issuance_key", server_default=None)
 
 
 def downgrade() -> None:

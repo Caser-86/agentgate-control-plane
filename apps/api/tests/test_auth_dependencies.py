@@ -1,5 +1,7 @@
 from collections.abc import Generator
+from uuid import uuid4
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session
 
@@ -24,6 +26,23 @@ def test_existing_browser_route_rejects_an_unauthenticated_request() -> None:
             response = client.get("/api/runs")
     finally:
         app.dependency_overrides.clear()
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "authentication_required"
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/meta",
+        "/api/audit",
+        "/api/audit/export",
+        "/api/policies",
+        f"/api/runs/{uuid4()}/events",
+    ],
+)
+def test_legacy_browser_reads_reject_an_unauthenticated_request(path: str) -> None:
+    response = TestClient(app).get(path)
 
     assert response.status_code == 401
     assert response.json()["error"]["code"] == "authentication_required"

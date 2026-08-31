@@ -43,3 +43,18 @@ The first frontend focused test run failed because the brief-required `AuthProvi
 - `python -m pytest -q`: `90 passed, 3 skipped`.
 - `python -m ruff check app tests`: passed.
 - `python -m mypy app`: passed.
+
+## Fix report — review round 2
+
+### Root causes and corrections
+
+- Existing local startup and Playwright server probes use `/health`. It is now explicitly documented as the sole anonymous infrastructure liveness probe: it returns only fixed status/service values, exposes no operator or business data, and remains outside the browser business API. All browser/API reads remain operator-protected.
+- Revision `0004` previously filled every historical bootstrap row with the same issuance key before creating its unique index. The migration now first ranks records, retains the best unconsumed/unexpired record as `bootstrap`, assigns every other record a distinct `legacy-<id>` key, then marks the column non-null and creates the unique index. The PostgreSQL migration test seeds duplicate historical rows and asserts that upgrade preserves the active record and produces unique keys.
+- Auth setup assertions now verify a 64-character lowercase SHA-256 digest and bootstrap-file deletion after successful setup. Legacy meta, audit, policies, and run-events read routes have explicit unauthenticated-rejection coverage.
+
+### Fix verification
+
+- `python -m pytest tests/test_auth_api.py tests/test_auth_dependencies.py tests/test_v1_api.py tests/test_health.py tests/test_runs_api.py tests/test_migrations.py -q`: `33 passed, 2 skipped`.
+- `python -m pytest -q`: `94 passed, 4 skipped`.
+- `python -m ruff check app tests`: passed.
+- `python -m mypy app`: passed.
