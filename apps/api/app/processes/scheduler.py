@@ -2,25 +2,19 @@
 
 import time
 from collections.abc import Iterable, Mapping
-from datetime import timedelta
 from typing import Any, cast
 
-from sqlalchemy import update
 from sqlmodel import Session, select
 
 from app.config import get_settings
-from app.control.enums import SideEffectCertainty, TaskKind, TaskStatus
+from app.control.enums import TaskKind, TaskStatus
 from app.control.models import ControlTask
 from app.control.repositories import (
-    MAX_RECOVERY_ATTEMPTS,
-    MAX_RECOVERY_BACKOFF_SECONDS,
-    append_outbox_event,
     enqueue_task_with_status,
+    recover_expired_task,
 )
 from app.db import get_engine
 from app.models import AgentRun, RunStatus, utc_now
-from app.repositories import AuditRepository
-from app.services.audit import AuditService
 
 
 def recover_expired_lease(
@@ -34,59 +28,15 @@ def recover_expired_lease(
     now: Any,
 ) -> bool:
     """Recover only the lease represented by the captured scheduler snapshot."""
-    task = session.get(ControlTask, task_id)
-    if task is None:
-        return False
-    attempts = task.attempts + 1
-    to_manual_review = (
-        task.side_effect_certainty == SideEffectCertainty.POSSIBLE
-        or attempts >= MAX_RECOVERY_ATTEMPTS
-    )
-    next_status = TaskStatus.MANUAL_REVIEW if to_manual_review else TaskStatus.QUEUED
-    values: dict[str, object] = {
-        "status": next_status.value,
-        "lease_owner_id": None,
-        "lease_expires_at": None,
-        "updated_at": now,
-        "attempts": attempts,
-    }
-    if to_manual_review:
-        values["completed_at"] = now
-    else:
-        values["available_at"] = now + timedelta(
-            seconds=min(2**attempts, MAX_RECOVERY_BACKOFF_SECONDS)
-        )
-    result = session.execute(
-        update(ControlTask)
-        .where(
-            cast(Any, ControlTask.id) == task_id,
-            cast(Any, ControlTask.lease_owner_id) == worker_id,
-            cast(Any, ControlTask.lease_version) == lease_version,
-            cast(Any, ControlTask.status) == status,
-            cast(Any, ControlTask.lease_expires_at) == lease_expires_at,
-            cast(Any, ControlTask.lease_expires_at) <= now,
-        )
-        .values(**values)
-        .execution_options(synchronize_session=False)
-    )
-    if cast(Any, result).rowcount != 1:
-        return False
-    AuditService(AuditRepository(session)).append(
-        event_type="task.lease_recovered",
-        actor="scheduler",
-        payload={"status": next_status.value, "attempts": attempts},
-        resource_type="control_task",
-        resource_id=task_id,
-        commit=False,
-    )
-    append_outbox_event(
+    return recover_expired_task(
         session,
-        event_type="task.updated",
-        resource_type="control_task",
-        resource_id=task_id,
-        payload={"status": next_status.value, "recovered": True},
+        task_id=task_id,
+        worker_id=worker_id,
+        lease_version=lease_version,
+        status=status,
+        lease_expires_at=lease_expires_at,
+        now=now,
     )
-    return True
 
 
 def _enqueue_due_tasks(session: Session, due_tasks: Iterable[Mapping[str, object]]) -> int:

@@ -65,3 +65,21 @@ Existing redaction, error-path, duplicate-approval, SSE cursor, pre-grant no-han
 - Per the interruption request, no full backend suite, full frontend suite/build, Docker startup smoke, `verify-foundation.ps1` live run, or new E2E run was started after cleanup. The latest valid prior bounded E2E evidence is the free-port `18220` run (`2 passed`).
 - `verify-foundation.ps1` previously hit the host's script execution-policy block without `Bypass`, and the prior Bypass attempt failed at the exact check `API is not loopback-only`; the revised script's live authenticated/native-Worker path remains unverified because it requires a running Compose stack, session cookie, and Worker tokens.
 - Stage 0 remains evidence-limited rather than accepted as a complete environment qualification; no secrets or token contents were printed.
+
+## Final integration fix pass — 2026-09-01
+
+- `AuditEventResponse.run_id` is now nullable and includes `resource_type`/`resource_id`; list/export regression coverage proves generic Worker events with `run_id=None` return 200, preserve resource context, and redact tokens.
+- Unsupported v1 read-only checks now receive a clear `403 unsupported_check`, persist one redacted `check.rejected` audit/Outbox record, and create no orphan task. The existing `platform.self_check` proposal remains the only Phase 0 check capability and keeps its safe payload contract.
+- Claim-path expired-lease recovery now calls the same guarded atomic recovery function as scheduler recovery. Successful retry/manual-review recovery appends audit and `task.updated` Outbox evidence in the same caller transaction; a focused claim test proves state/event consistency and existing race tests remain covered.
+- `verify-foundation.ps1` now proposes the safe check, creates a temporary native Worker state directory, runs register/heartbeat/claim/start/complete, removes temporary credentials/journal in `finally`, and only then requires the authenticated platform heartbeat/migration gate. Compose ports remain derived from structured JSON and no secrets are printed.
+
+### Fresh final verification
+
+- Backend Ruff — PASS; mypy — `Success: no issues found in 53 source files`; pytest — `156 passed, 5 skipped in 7.33s`; eval runner — six cases, each `4/4 PASS`.
+- Focused integration tests — `23 passed, 3 skipped`; PostgreSQL skips are because `AGENTGATE_TEST_DATABASE_URL` is unset. No persistent/user DB was used.
+- Frontend lint — PASS; typecheck — PASS; Vitest — `7 files, 12 tests passed`; build — PASS.
+- `docker compose config --quiet` — PASS; PowerShell AST parse — PASS.
+- Bounded E2E on isolated ports `18220`/`18221` — `2 passed (14.4s)`; both Chinese approval/denial flows rendered the denial state and retained audit evidence after refresh.
+- `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-foundation.ps1` — FAIL at line 29 with `API health check failed.` The worktree Compose stack was not running; port inspection showed `8000` held by two unrelated listeners. The script did not start or restart services. Temporary E2E ports had no remaining listeners.
+
+Stage 0 is **not accepted**: live foundation verification and PostgreSQL-specific race coverage remain unavailable in this environment, despite the bounded E2E and all available local checks passing.

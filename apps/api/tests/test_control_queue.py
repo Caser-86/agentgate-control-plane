@@ -6,7 +6,7 @@ from sqlmodel import Session, select
 
 from app.config import get_settings
 from app.control.enums import SideEffectCertainty, TaskKind, TaskOutcome, TaskStatus
-from app.control.models import OutboxEvent
+from app.control.models import ControlTask, OutboxEvent
 from app.control.repositories import (
     append_outbox_event,
     claim_next_task,
@@ -16,6 +16,7 @@ from app.control.repositories import (
 )
 from app.db import create_db_and_tables, create_db_engine
 from app.models import AgentRun, RunStatus
+from app.repositories import AuditRepository
 
 
 def test_duplicate_idempotency_key_returns_one_task() -> None:
@@ -105,6 +106,47 @@ def test_expired_possible_side_effect_task_requires_manual_review() -> None:
         )
         session.refresh(task)
         assert task.status == TaskStatus.MANUAL_REVIEW
+
+
+def test_claim_recovery_emits_audit_and_outbox_with_state_transition() -> None:
+    engine = create_db_engine("sqlite://")
+    create_db_and_tables(engine)
+    with Session(engine) as session:
+        task = enqueue_task(
+            session,
+            kind=TaskKind.CONTROL,
+            payload={"task_type": "platform.self_check"},
+            idempotency_key=f"claim-recovery-events:{uuid4()}",
+            capability="platform.self_check",
+        )
+        task_id = task.id
+        first = claim_next_task(
+            session,
+            worker_id=uuid4(),
+            capabilities={"platform.self_check"},
+            now=task.available_at,
+        )
+        assert first is not None
+        lease_expiry = first.lease_expires_at
+        assert lease_expiry is not None
+        assert claim_next_task(
+            session,
+            worker_id=uuid4(),
+            capabilities={"platform.self_check"},
+            now=lease_expiry + timedelta(seconds=1),
+        ) is None
+        session.commit()
+
+    with Session(engine) as session:
+        recovered = session.get(ControlTask, task_id)
+        assert recovered is not None
+        assert recovered.status == TaskStatus.QUEUED
+        assert [event.event_type for event in AuditRepository(session).list()] == [
+            "task.lease_recovered"
+        ]
+        assert {
+            event.event_type for event in session.exec(select(OutboxEvent)).all()
+        } == {"task.lease_recovered", "task.updated"}
 
 
 def test_postgres_sessions_allow_only_one_worker_to_claim_task(postgres_session_pair) -> None:

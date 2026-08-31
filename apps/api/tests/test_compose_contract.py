@@ -51,6 +51,15 @@ def test_local_scripts_run_migrations_before_services_and_use_npm_cmd() -> None:
     assert "database_migration_current" in verify_script
 
 
+def test_foundation_verification_starts_worker_before_heartbeat_gate() -> None:
+    verify_script = (REPO_ROOT / "scripts/verify-foundation.ps1").read_text(encoding="utf-8")
+    assert verify_script.index("--enrollment-token") < verify_script.index(
+        "/api/platform/self-check"
+    )
+    assert "state-dir" in verify_script
+    assert "Remove-Item" in verify_script
+
+
 def test_required_task7_operator_scripts_exist() -> None:
     for name in (
         "migrate-local.ps1",

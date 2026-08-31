@@ -73,6 +73,8 @@ def to_audit_response(event: AuditEvent) -> AuditEventResponse:
         id=event.id,
         run_id=event.run_id,
         action_id=event.action_id,
+        resource_type=event.resource_type,
+        resource_id=event.resource_id,
         event_type=event.event_type,
         actor=event.actor,
         payload=redact(_parse_json(event.payload_json) or {}),

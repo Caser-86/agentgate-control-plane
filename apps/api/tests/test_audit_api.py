@@ -1,4 +1,5 @@
-from uuid import UUID
+import json
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -35,3 +36,34 @@ def test_audit_list_and_export(api_client: tuple[TestClient, UUID]) -> None:
     assert exported.status_code == 200
     assert exported.headers["content-type"].startswith("application/json")
     assert "attachment" in exported.headers["content-disposition"]
+
+
+def test_generic_audit_list_and_export_allow_missing_run_id(
+    auth_client: tuple[TestClient, object, object],
+) -> None:
+    client, engine, token_file = auth_client
+    resource_id = uuid4()
+    with Session(engine) as session:
+        event = AuditService(AuditRepository(session)).append(
+            event_type="worker.registered",
+            actor="worker",
+            payload={"resource": "local-worker", "token": "do-not-leak"},
+            resource_type="worker",
+            resource_id=resource_id,
+        )
+        event_id = event.id
+
+    authenticate_client(client, token_file)
+    listed = client.get("/api/audit")
+    exported = client.get("/api/audit/export")
+
+    assert listed.status_code == 200
+    listed_event = next(item for item in listed.json() if item["id"] == str(event_id))
+    assert listed_event["run_id"] is None
+    assert listed_event["resource_type"] == "worker"
+    assert listed_event["resource_id"] == str(resource_id)
+    assert listed_event["payload"]["token"] == "***REDACTED***"
+    assert exported.status_code == 200
+    exported_event = next(item for item in json.loads(exported.text) if item["id"] == str(event_id))
+    assert exported_event["run_id"] is None
+    assert exported_event["resource_type"] == "worker"

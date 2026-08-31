@@ -51,8 +51,10 @@ export interface ToolAction {
 
 export interface AuditEvent {
   id: string;
-  run_id: string;
+  run_id: string | null;
   action_id: string | null;
+  resource_type: string | null;
+  resource_id: string | null;
   event_type: string;
   actor: string;
   payload: unknown;

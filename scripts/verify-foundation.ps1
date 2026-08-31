@@ -34,11 +34,6 @@ if ([string]::IsNullOrWhiteSpace($OperatorSessionCookie)) {
     throw "Authenticated platform self-check requires AGENTGATE_SESSION_COOKIE; cookie contents are never printed."
 }
 $operatorHeaders["Cookie"] = "agentgate_session=$OperatorSessionCookie"
-$platform = Invoke-RestMethod -Headers $operatorHeaders -Uri "http://127.0.0.1:$apiPort/api/platform/self-check" -TimeoutSec 5
-if ($null -eq $platform.migration_check -or $platform.migration_check.status -ne "ok" -or $platform.migration_check.code -ne "database_migration_current") { throw "Database migration is missing or stale." }
-if ($platform.stale_lease_count -gt 0) { throw "A stale queue lease requires scheduler cleanup." }
-if ($null -eq $platform.worker_heartbeat_age_seconds -or $platform.worker_heartbeat_age_seconds -gt $MaxHeartbeatAgeSeconds) { throw "Worker heartbeat is missing or stale." }
-if ($platform.PSObject.Properties.Name -contains "api_key") { throw "Self-check exposed a secret field." }
 
 if ([string]::IsNullOrWhiteSpace($WorkerCheckToken) -or [string]::IsNullOrWhiteSpace($WorkerEnrollmentToken)) {
     throw "Worker self-check requires AGENTGATE_WORKER_CHECK_TOKEN and AGENTGATE_WORKER_ENROLLMENT_TOKEN; token contents are never printed."
@@ -50,9 +45,22 @@ $check = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:$apiPort/api/v1/c
 $workerPython = Join-Path $repoRoot "apps\api\.venv\Scripts\python.exe"
 $workerRoot = Join-Path $repoRoot "apps\worker"
 if (-not (Test-Path -LiteralPath $workerPython)) { throw "Native Worker Python runtime was not found." }
-Push-Location $workerRoot
+$workerStateDir = Join-Path ([System.IO.Path]::GetTempPath()) ("agentgate-worker-verify-" + [Guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Path $workerStateDir -Force | Out-Null
 try {
-    & $workerPython -m agentgate_worker.main --api-url "http://127.0.0.1:$apiPort" --state-dir ".agentgate-worker-verify" --enrollment-token $WorkerEnrollmentToken
+    Push-Location $workerRoot
+    try {
+        & $workerPython -m agentgate_worker.main --api-url "http://127.0.0.1:$apiPort" --state-dir $workerStateDir --enrollment-token $WorkerEnrollmentToken
+    } finally { Pop-Location }
     if ($LASTEXITCODE -ne 0) { throw "Native Worker self-check round trip failed." }
-} finally { Pop-Location }
+} finally {
+    if (Test-Path -LiteralPath $workerStateDir) {
+        Remove-Item -LiteralPath $workerStateDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+$platform = Invoke-RestMethod -Headers $operatorHeaders -Uri "http://127.0.0.1:$apiPort/api/platform/self-check" -TimeoutSec 5
+if ($null -eq $platform.migration_check -or $platform.migration_check.status -ne "ok" -or $platform.migration_check.code -ne "database_migration_current") { throw "Database migration is missing or stale." }
+if ($platform.stale_lease_count -gt 0) { throw "A stale queue lease requires scheduler cleanup." }
+if ($null -eq $platform.worker_heartbeat_age_seconds -or $platform.worker_heartbeat_age_seconds -gt $MaxHeartbeatAgeSeconds) { throw "Worker heartbeat is missing or stale." }
+if ($platform.PSObject.Properties.Name -contains "api_key") { throw "Self-check exposed a secret field." }
 Write-Host "Foundation verification passed: loopback ports $apiPort/$webPort, migration, auth, heartbeat and native Worker self-check."

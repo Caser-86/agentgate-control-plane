@@ -1,4 +1,4 @@
-from typing import Annotated, cast
+from typing import Annotated
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -67,30 +67,31 @@ def propose_event(
 def propose_check(
     request: CheckProposalRequest, client: CheckClientDep, session: SessionDep
 ) -> ProposalResponse:
-    registered, normalized = _validate_registered_target(
+    registered, _ = _validate_registered_target(
         ToolRegistry(), request.check_type, request.target, request.parameters
     )
     if not registered.spec.read_only:
         raise _deny("check_must_be_read_only")
-    payload: dict[str, object] = (
-        {"task_type": "platform.self_check"}
-        if request.check_type == "platform.self_check"
-        else cast(dict[str, object], {
-            "check_type": request.check_type,
-            "target": request.target,
-            "parameters": normalized,
-            "actor": client.actor,
-        })
-    )
-    capability = (
-        "platform.self_check" if request.check_type == "platform.self_check" else "check"
-    )
+    if request.check_type != "platform.self_check":
+        AuditService(AuditRepository(session)).append(
+            event_type="check.rejected",
+            actor=client.actor,
+            payload={
+                "check_type": request.check_type,
+                "target": request.target,
+                "reason": "unsupported_phase_zero_check",
+            },
+            resource_type="check_proposal",
+            resource_id=uuid4(),
+        )
+        raise _deny("unsupported_check")
+    payload: dict[str, object] = {"task_type": "platform.self_check"}
     task = enqueue_task(
         session,
         kind=TaskKind.CONTROL,
         payload=payload,
         idempotency_key=request.idempotency_key,
-        capability=capability,
+        capability="platform.self_check",
         side_effect_certainty=SideEffectCertainty.READ_ONLY,
     )
     session.commit()

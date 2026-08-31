@@ -106,8 +106,10 @@ class ToolActionResponse(BaseModel):
 
 class AuditEventResponse(BaseModel):
     id: UUID
-    run_id: UUID
+    run_id: UUID | None
     action_id: UUID | None
+    resource_type: str | None
+    resource_id: UUID | None
     event_type: str
     actor: str
     payload: object
