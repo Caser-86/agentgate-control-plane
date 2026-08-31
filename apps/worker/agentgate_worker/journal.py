@@ -7,13 +7,27 @@ from pathlib import Path
 
 MAX_JOURNAL_RESULT_BYTES = 4096
 REDACTED = "***REDACTED***"
-SENSITIVE_KEYS = frozenset({"api_key", "authorization", "token", "secret", "password"})
+ALLOWED_RESULT_KEYS = frozenset(
+    {"status", "worker_version", "protocol_version", "capabilities", "detail"}
+)
+SENSITIVE_KEY_PARTS = frozenset(
+    {"apikey", "authorization", "clientsecret", "password", "passwordhash", "secret", "token"}
+)
+
+
+def _normalized_key(key: object) -> str:
+    return "".join(character for character in str(key).lower() if character.isalnum())
+
+
+def _is_sensitive_key(key: object) -> bool:
+    normalized = _normalized_key(key)
+    return any(part in normalized for part in SENSITIVE_KEY_PARTS)
 
 
 def _redact(value: object) -> object:
     if isinstance(value, Mapping):
         return {
-            str(key): REDACTED if str(key).lower() in SENSITIVE_KEYS else _redact(item)
+            str(key): REDACTED if _is_sensitive_key(key) else _redact(item)
             for key, item in value.items()
         }
     if isinstance(value, list):
@@ -25,27 +39,50 @@ def _bounded_result(result: dict[str, object], max_result_bytes: int) -> dict[st
     safe = _redact(result)
     if not isinstance(safe, dict):
         raise ValueError("journal result must be an object")
-    encoded = json.dumps(safe, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(
-        "utf-8"
-    )
-    if len(encoded) <= max_result_bytes:
-        return safe
     bounded: dict[str, object] = {
-        key: value for key, value in safe.items() if key.lower() in SENSITIVE_KEYS
-    }
-    bounded["status"] = str(safe.get("status", "unknown"))
-    bounded["truncated"] = True
-    remaining = (
-        max_result_bytes
-        - len(json.dumps(bounded, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
-        - 32
-    )
-    detail = safe.get("detail")
-    if isinstance(detail, str) and remaining > 0:
-        bounded["detail"] = detail.encode("utf-8")[: max(0, remaining)].decode(
-            "utf-8", errors="ignore"
+        key: value
+        for key, value in safe.items()
+        if key in ALLOWED_RESULT_KEYS
+        and (
+            key != "capabilities"
+            or isinstance(value, list) and all(isinstance(item, str) for item in value)
         )
-    return bounded
+        and (
+            key not in {"status", "worker_version", "protocol_version", "detail"}
+            or isinstance(value, str)
+        )
+    }
+    if "status" not in bounded:
+        bounded["status"] = "unknown"
+    encoded = json.dumps(
+        bounded, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
+    if len(encoded) <= max_result_bytes:
+        return bounded
+    bounded["truncated"] = True
+    while True:
+        encoded = json.dumps(
+            bounded, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        ).encode("utf-8")
+        if len(encoded) <= max_result_bytes:
+            return bounded
+        candidates = [
+            key
+            for key in ("detail", "status", "worker_version", "protocol_version")
+            if isinstance(bounded.get(key), str) and bounded[key]
+        ]
+        if candidates:
+            key = max(candidates, key=lambda item: len(str(bounded[item]).encode("utf-8")))
+            value = str(bounded[key])
+            byte_count = len(value.encode("utf-8"))
+            bounded[key] = value.encode("utf-8")[: byte_count // 2].decode(
+                "utf-8", errors="ignore"
+            )
+            continue
+        if "capabilities" in bounded:
+            bounded.pop("capabilities")
+            continue
+        bounded["status"] = ""
 
 
 class WorkerJournal:

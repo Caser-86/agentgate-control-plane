@@ -18,7 +18,9 @@ class DPAPIProtector:
             import win32crypt  # type: ignore[import-untyped]
         except ImportError as error:
             raise RuntimeError("Windows DPAPI support is unavailable") from error
-        return bytes(win32crypt.CryptProtectData(value, "AgentGate Worker", None, None, None, 0))
+        return bytes(
+            win32crypt.CryptProtectData(value, "AgentGate Worker", None, None, None, 0)[1]
+        )
 
     def unprotect(self, value: bytes) -> bytes:
         try:
