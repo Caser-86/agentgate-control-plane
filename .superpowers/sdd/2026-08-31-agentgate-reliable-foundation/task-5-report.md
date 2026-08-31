@@ -19,3 +19,9 @@
 ## Scope
 
 Task 6 request-bound `BackgroundTasks` behavior was intentionally retained; no Worker scheduling or real host action was added.
+
+## Fix Round 1
+
+- Changed executor `action.updated` Outbox events to use the owning `run_id` as `resource_id`; `action_id` remains in the payload. This preserves run-scoped SSE replay without changing the Outbox schema and leaves generic no-run events unchanged.
+- Added a real run endpoint handler regression: an approved action is executed, its running and succeeded events are read from `/api/runs/{run_id}/events`, and reconnecting with `Last-Event-ID` plus `after` replays the next sequence exactly once.
+- Focused command: `python -m pytest tests/test_sse.py tests/test_outbox_stream.py tests/test_agent_loop.py tests/test_approvals.py tests/test_executor.py -q` — 27 passed.

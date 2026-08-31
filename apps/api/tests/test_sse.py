@@ -1,3 +1,5 @@
+import asyncio
+import json
 from collections.abc import AsyncIterator
 from uuid import uuid4
 
@@ -7,7 +9,9 @@ from sqlmodel import Session
 
 from app.control.repositories import append_outbox_event
 from app.db import seed_demo_state
+from app.models import ActionStatus, PolicyDecision, RiskLevel, ToolAction
 from app.repositories import RunRepository
+from app.services.executor import ToolExecutor
 from tests.conftest import authenticate_client
 
 
@@ -48,6 +52,62 @@ async def test_run_stream_reconnects_after_last_event_id() -> None:
     )
 
     assert frames == ['id: 3\nevent: run.updated\ndata: {"status": "completed"}\n\n']
+
+
+@pytest.mark.asyncio
+async def test_run_endpoint_replays_approved_action_events_without_duplicates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.api import runs as runs_api
+    from app.auth.models import Operator
+    from app.db import create_db_and_tables, create_db_engine, seed_demo_state
+    from app.services.outbox import read_events_after
+
+    engine = create_db_engine("sqlite://")
+    create_db_and_tables(engine)
+    with Session(engine) as session:
+        seed_demo_state(session)
+        run = RunRepository(session).create("Inspect payments", "mock", "mock")
+        action = ToolAction(
+            run_id=run.id,
+            tool_call_id="approved-call",
+            tool_name="get_service_health",
+            risk_level=RiskLevel.LOW,
+            policy_decision=PolicyDecision.REQUIRE_APPROVAL,
+            status=ActionStatus.APPROVED,
+            arguments_json=json.dumps({"service": "payments-api"}),
+            reason="approved by operator",
+            idempotency_key="approved-action-event",
+        )
+        session.add(action)
+        session.commit()
+        await ToolExecutor(session).execute(action.id)
+
+        monkeypatch.setattr(runs_api, "get_engine", lambda: engine)
+        response = await runs_api.run_events(
+            run.id,
+            session,
+            Operator(password_hash="test-only"),
+            after="0",
+        )
+        frames = await asyncio.wait_for(_take(response.body_iterator, 2), timeout=0.1)
+        event_ids = [int(frame.split("\n", 1)[0].removeprefix("id: ")) for frame in frames]
+
+        replay = await runs_api.run_events(
+            run.id,
+            session,
+            Operator(password_hash="test-only"),
+            after=str(event_ids[1]),
+            last_event_id=str(event_ids[0]),
+        )
+        replayed = await asyncio.wait_for(_take(replay.body_iterator, 1), timeout=0.1)
+        persisted = read_events_after(session, cursor=0, resource_id=run.id, limit=10)
+
+    assert event_ids == sorted(event_ids)
+    assert len(event_ids) == len(set(event_ids))
+    assert all("event: action.updated" in frame for frame in frames)
+    assert f'id: {event_ids[1]}\n' in replayed[0]
+    assert [event.sequence for event in persisted] == event_ids
 
 
 @pytest.mark.asyncio

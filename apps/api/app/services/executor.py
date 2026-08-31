@@ -45,8 +45,8 @@ class ToolExecutor:
         append_outbox_event(
             self.session,
             event_type="action.updated",
-            resource_type="action",
-            resource_id=action.id,
+            resource_type="run",
+            resource_id=action.run_id,
             payload={"action_id": str(action.id), "status": action.status.value},
         )
 
