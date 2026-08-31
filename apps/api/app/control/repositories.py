@@ -20,11 +20,27 @@ def enqueue_task(
     capability: str, run_id: UUID | None = None,
     side_effect_certainty: SideEffectCertainty = SideEffectCertainty.READ_ONLY,
 ) -> ControlTask:
+    return enqueue_task_with_status(
+        session,
+        kind=kind,
+        payload=payload,
+        idempotency_key=idempotency_key,
+        capability=capability,
+        run_id=run_id,
+        side_effect_certainty=side_effect_certainty,
+    )[0]
+
+
+def enqueue_task_with_status(
+    session: Session, *, kind: TaskKind, payload: dict[str, object], idempotency_key: str,
+    capability: str, run_id: UUID | None = None,
+    side_effect_certainty: SideEffectCertainty = SideEffectCertainty.READ_ONLY,
+) -> tuple[ControlTask, bool]:
     existing = session.exec(
         select(ControlTask).where(ControlTask.idempotency_key == idempotency_key)
     ).first()
     if existing is not None:
-        return existing
+        return existing, False
     if session.get_bind().dialect.name == "postgresql":
         task_id = uuid4()
         created_at = utc_now()
@@ -50,18 +66,18 @@ def enqueue_task(
         if inserted_id is not None:
             created = session.get(ControlTask, inserted_id)
             if created is not None:
-                return created
+                return created, True
         existing = session.exec(
             select(ControlTask).where(ControlTask.idempotency_key == idempotency_key)
         ).one()
-        return existing
+        return existing, False
     task = ControlTask(
         kind=kind, payload=payload, idempotency_key=idempotency_key, capability=capability,
         run_id=run_id, side_effect_certainty=side_effect_certainty,
     )
     session.add(task)
     session.flush()
-    return task
+    return task, True
 
 
 def _expired_lease(task: ControlTask, now: datetime) -> bool:

@@ -13,16 +13,16 @@ from app.control.models import ControlTask
 from app.control.repositories import (
     MAX_RECOVERY_ATTEMPTS,
     MAX_RECOVERY_BACKOFF_SECONDS,
-    enqueue_task,
+    enqueue_task_with_status,
 )
 from app.db import get_engine
-from app.models import utc_now
+from app.models import AgentRun, RunStatus, utc_now
 
 
 def _enqueue_due_tasks(session: Session, due_tasks: Iterable[Mapping[str, object]]) -> int:
     enqueued = 0
     for due_task in due_tasks:
-        enqueue_task(
+        _, created = enqueue_task_with_status(
             session,
             kind=cast(TaskKind, due_task["kind"]),
             payload=cast(dict[str, object], due_task["payload"]),
@@ -30,7 +30,7 @@ def _enqueue_due_tasks(session: Session, due_tasks: Iterable[Mapping[str, object
             capability=cast(str, due_task["capability"]),
             run_id=cast(Any, due_task.get("run_id")),
         )
-        enqueued += 1
+        enqueued += int(created)
     return enqueued
 
 
@@ -42,11 +42,30 @@ def enqueue_due_tasks(due_tasks: Iterable[Mapping[str, object]]) -> int:
     return enqueued
 
 
-def run_once(due_tasks: Iterable[Mapping[str, object]] = ()) -> int:
+def _discover_due_tasks(session: Session) -> list[dict[str, object]]:
+    runs = session.exec(
+        cast(
+            Any,
+            select(AgentRun).where(cast(Any, AgentRun.status) == RunStatus.QUEUED),
+        )
+    ).all()
+    return [
+        {
+            "kind": TaskKind.AGENT_RUN,
+            "payload": {"run_id": str(run.id)},
+            "idempotency_key": f"agent-run-resume:{run.id}:initial",
+            "capability": "control.run",
+            "run_id": run.id,
+        }
+        for run in runs
+    ]
+
+
+def run_once() -> int:
     now = utc_now()
     changed = 0
     with Session(get_engine()) as session:
-        changed += _enqueue_due_tasks(session, due_tasks)
+        changed += _enqueue_due_tasks(session, _discover_due_tasks(session))
         tasks = session.exec(
             cast(
                 Any,

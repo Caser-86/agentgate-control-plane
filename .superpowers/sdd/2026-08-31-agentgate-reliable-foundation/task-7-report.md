@@ -7,22 +7,26 @@
 - `apps/api/app/api/platform.py`、`apps/api/app/services/platform_checks.py`：结构化 health/self-check，包含 status、稳定英文 code、`message_zh`、`observed_at`、有界 details；provider 仅返回名称/模型/配置状态，不返回密钥。
 - `apps/api/app/services/platform_checks.py`：self-check 读取数据库 `alembic_version` 的 applied revision，并与代码 migration head 比较；缺失或不一致返回明确 unhealthy migration check。
 - `apps/api/app/main.py`：挂载平台路由。
+- `apps/api/app/control/repositories.py`：保留原有 `enqueue_task()` 合同并增加新插入状态，用于准确统计 scheduler 新增任务。
 - `apps/api/app/processes/scheduler.py`：通过现有 `enqueue_task()` 幂等入队 due task，并恢复过期 durable lease；可能有副作用的任务进入 manual review，安全任务按有界退避重新排队。
+- review fix：scheduler 默认从 durable `AgentRun(status=queued)` 发现待调度 run，使用 `agent-run-resume:{run_id}:initial` 补入队；不执行 run，仍由 control-worker claim/process。repository 插入状态返回使重复幂等键不计入新增数。
 - `scripts/start-local.ps1`、`scripts/stop-local.ps1`、`scripts/migrate-local.ps1`、`scripts/setup-local.ps1`、`scripts/verify-foundation.ps1`：本机固定 Compose 命令、迁移优先、健康等待、localhost/迁移/认证/heartbeat/self-check/lease 校验；前端命令使用 `npm.cmd`，不打印 token 内容。
 - `README.md`、`docs/architecture.md`：中文友好的首跑命令、端口、迁移、Phase 0 无真实宿主机动作边界。
-- `apps/api/tests/test_platform_checks.py`、`apps/api/tests/test_compose_contract.py`、`apps/api/tests/test_scheduler.py`：Task 7 focused tests，覆盖 stale/missing migration、服务角色、due-task 幂等入队和 lease 恢复。
+- `apps/api/tests/test_platform_checks.py`、`apps/api/tests/test_compose_contract.py`、`apps/api/tests/test_scheduler.py`：Task 7 focused tests，覆盖 stale/missing migration、服务角色、run_once/run_forever due discovery、重复调用 exactly-one 入队、幂等返回计数和 lease 恢复。
 
 ## TDD 证据
 
-先新增 focused tests 后运行：4 个新增回归断言失败，原因是 self-check 没有数据库 revision 比对、scheduler 没有 due-task 入队接口。实现后 focused tests 为 12 passed。
+先新增 focused tests 后运行：4 个新增回归断言失败，原因是 scheduler 幂等返回计数错误且 run_once 没有数据库 due discovery。实现并补充 run_forever 入口覆盖后 focused tests 为 14 passed。
 
 ## 验证
 
 - `apps/api/.venv/Scripts/python.exe -m pytest tests/test_platform_checks.py tests/test_compose_contract.py -q`：8 passed。
 - `apps/api/.venv/Scripts/python.exe -m pytest tests/test_platform_checks.py tests/test_compose_contract.py tests/test_scheduler.py -q`：12 passed。
-- `apps/api/.venv/Scripts/python.exe -m pytest tests -q`：129 passed, 4 skipped。
-- `ruff check apps/api/app apps/api/tests`：passed。
-- Task 7 定向 mypy（platform.py、platform_checks.py、scheduler.py）：passed。
+- `apps/api/.venv/Scripts/python.exe -m pytest tests/test_platform_checks.py tests/test_compose_contract.py tests/test_scheduler.py -q`（review fix）：13 passed。
+- `apps/api/.venv/Scripts/python.exe -m pytest tests/test_platform_checks.py tests/test_compose_contract.py tests/test_scheduler.py -q`（final）：14 passed。
+- `apps/api/.venv/Scripts/python.exe -m pytest tests -q`（final）：135 passed, 4 skipped。
+- `ruff check app tests`（final）：passed。
+- `mypy app`（final）：passed。
 - `docker compose config --quiet`：passed。
 - 五个 PowerShell 脚本 AST parse：全部 `PARSE_OK`。
 
