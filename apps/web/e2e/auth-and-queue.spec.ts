@@ -14,6 +14,27 @@ function bootstrapToken(projectName: string): string {
   return fs.readFileSync(tokenFile, "utf8").trim();
 }
 
+async function hasRecordedRunStatus(page: import("@playwright/test").Page, runId: string, status: string): Promise<boolean> {
+  const apiPort = Number(process.env.AGENTGATE_E2E_API_PORT ?? "8000") + 1;
+  let cursor = 0;
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    let response;
+    try {
+      response = await page.request.get(`http://127.0.0.1:${apiPort}/api/runs/${runId}/events?after=${cursor}&limit=1`, { timeout: 1_000 });
+    } catch {
+      return false;
+    }
+    if (!response.ok()) throw new Error(`run events request failed: ${response.status()}`);
+    const frame = await response.text();
+    const dataLine = frame.split("\n").find((line) => line.startsWith("data: "));
+    if (frame.includes("event: run.updated") && dataLine && (JSON.parse(dataLine.slice(6)) as { status?: string }).status === status) return true;
+    const nextCursor = Number(frame.match(/^id: (\d+)$/m)?.[1]);
+    if (!Number.isSafeInteger(nextCursor) || nextCursor <= cursor) return false;
+    cursor = nextCursor;
+  }
+  return false;
+}
+
 test("中文首次登录、排队审批拒绝并在刷新后保留审计游标", async ({ page }, testInfo) => {
   await page.goto("/login");
   const setup = page.getByRole("heading", { name: "初始化管理员密码", exact: true });
@@ -28,17 +49,21 @@ test("中文首次登录、排队审批拒绝并在刷新后保留审计游标",
   );
   const runCreated = page.waitForResponse((response) => response.url().endsWith("/api/runs") && response.request().method() === "POST");
   await page.getByTestId("start-run").click();
-  await expect((await runCreated).json()).resolves.toMatchObject({ status: "queued" });
+  const createdRun = await (await runCreated).json() as { id: string; status: string };
+  expect(createdRun.status).toBe("queued");
   await expect(page).toHaveURL(/\/runs\/[0-9a-f-]+/);
   await expect(page.locator('[data-testid="run-status"]').first()).toBeVisible();
-  await expect(page.locator('[data-testid="run-status"]').first()).toContainText(/Queued|Running|Waiting approval/);
-  await expect.poll(async () => { await page.reload(); return page.getByTestId("approval-card").count(); }, { timeout: 15_000 }).toBe(1);
+  await expect.poll(() => hasRecordedRunStatus(page, createdRun.id, "running"), { timeout: 15_000, intervals: [100, 250, 500] }).toBe(true);
+  await page.reload();
+  await expect(page.getByTestId("run-status")).toContainText("Waiting approval");
+  await expect(page.getByTestId("approval-card")).toBeVisible({ timeout: 15_000 });
   await expect(page.getByTestId("approval-card")).toContainText("需要人工审批");
 
   const approval = page.getByTestId("approval-card");
+  await expect(page.locator('[data-testid="action-status"] .status-pending-approval')).toBeVisible();
   await expect(approval.getByRole("button", { name: "拒绝", exact: true })).toBeVisible();
   await approval.getByTestId("approval-deny").click();
-  await expect(page.locator('[data-testid="action-status"].status-denied')).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('[data-testid="action-status"] .status-denied')).toBeVisible({ timeout: 15_000 });
   await page.reload();
   await expect(page.getByText("approval.denied", { exact: true })).toBeVisible();
   await expect(page.getByText('"denied": true', { exact: true })).toBeVisible();

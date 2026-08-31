@@ -31,3 +31,9 @@
 ## Safety and scope
 
 Existing redaction, error-path, duplicate-approval, SSE cursor, pre-grant no-handler, post-grant journal, and no-host-mutation assertions remain. No arbitrary shell, remote target, file mutation, real restart, or model dependency was added. The only extra non-brief production-file changes are test-environment-only startup hooks strictly required to initialize the E2E disposable SQLite database and run the existing durable control worker.
+
+## Final review follow-up
+
+- 两份 Web E2E spec 现在都断言 POST 返回的 `queued`，通过同一 run 的有界 Outbox SSE 回放确认已记录 `run.updated(status=running)`，再用 `run-status` 确认 `Waiting approval`；审批流额外用稳定 test IDs 断言 `pending_approval`、`denied` 和 `approval.denied` 审计记录。Running 不依赖短暂 DOM 停留，中文流程与现有隔离保持不变。
+- Fresh bounded frontend checks: `npm.cmd run typecheck` — PASS; `npm.cmd run lint` — PASS; `npm.cmd test -- --run` — `7 files, 11 tests passed`; `npm.cmd run build` — PASS。
+- E2E limitation: per request, the bounded E2E run was interrupted before completion and is not claimed as passing. The prior bounded runs reached the durable queued → running → waiting-approval state, but exposed and were used to correct test-source/selector issues; no final E2E pass is reported here.
