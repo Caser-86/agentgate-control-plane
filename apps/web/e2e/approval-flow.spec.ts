@@ -1,26 +1,40 @@
 import { expect, test } from "@playwright/test";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
-async function login(page: import("@playwright/test").Page): Promise<void> {
+function bootstrapToken(projectName: string): string {
+  const configured = process.env.AGENTGATE_E2E_BOOTSTRAP_TOKEN;
+  if (configured) return configured.trim();
+  const apiPort = Number(process.env.AGENTGATE_E2E_API_PORT ?? "8000");
+  const tokenFile = path.join(os.tmpdir(), `agentgate-e2e-task8-${projectName}-${apiPort}`, "bootstrap-token");
+  if (!fs.existsSync(tokenFile)) {
+    throw new Error(`E2E bootstrap token is missing: set AGENTGATE_E2E_BOOTSTRAP_TOKEN or provide ${tokenFile}`);
+  }
+  return fs.readFileSync(tokenFile, "utf8").trim();
+}
+
+async function login(page: import("@playwright/test").Page, projectName: string): Promise<void> {
   await page.goto("/login");
-  const token = process.env.AGENTGATE_E2E_BOOTSTRAP_TOKEN;
-  const bootstrapToken = token ?? fs.readFileSync(process.env.AGENTGATE_E2E_BOOTSTRAP_TOKEN_FILE ?? "", "utf8");
-  await page.getByRole("textbox", { name: "引导令牌" }).fill(bootstrapToken);
+  await page.getByRole("textbox", { name: "引导令牌" }).fill(bootstrapToken(projectName));
   await page.getByLabel("管理员密码").fill("fake-e2e-password");
   await page.getByRole("button", { name: "完成初始化", exact: true }).click();
 }
 
-test("拒绝降级服务恢复并保留可审计记录", async ({ page, browser }) => {
-  await login(page);
+test("拒绝降级服务恢复并保留可审计记录", async ({ page, browser }, testInfo) => {
+  await login(page, testInfo.project.name);
   await expect(page.getByRole("heading", { name: "运行", exact: true })).toBeVisible();
 
   await page.getByTestId("run-request").fill(
     "Investigate payments-api and restore it safely. Do not rotate credentials.",
   );
+  const runCreated = page.waitForResponse((response) => response.url().endsWith("/api/runs") && response.request().method() === "POST");
   await page.getByTestId("start-run").click();
+  await expect((await runCreated).json()).resolves.toMatchObject({ status: "queued" });
 
   await expect(page).toHaveURL(/\/runs\/[0-9a-f-]+/);
-  await expect(page.getByTestId("approval-card")).toBeVisible();
+  await expect.poll(async () => { await page.reload(); return page.getByTestId("approval-card").count(); }, { timeout: 15_000 }).toBe(1);
+  await expect(page.getByTestId("approval-card")).toContainText("需要人工审批");
   const approval = page.getByTestId("approval-card");
   await expect(approval).toBeVisible();
   await expect(approval.locator(".status-medium")).toBeVisible();
@@ -32,6 +46,7 @@ test("拒绝降级服务恢复并保留可审计记录", async ({ page, browser 
   const waitingBody = await page.locator("body").innerText();
   expect(waitingBody).not.toContain("api_key");
 
+  await expect(approval.getByRole("button", { name: "拒绝", exact: true })).toBeVisible();
   await approval.getByTestId("approval-deny").click();
   await expect(page.locator('[data-testid="action-status"].status-denied')).toBeVisible({ timeout: 15_000 });
   await page.reload();
@@ -41,6 +56,7 @@ test("拒绝降级服务恢复并保留可审计记录", async ({ page, browser 
   const runId = page.url().split("/").pop();
   expect(runId).toBeTruthy();
   await page.goto("/audit");
+  await expect(page.getByRole("heading", { name: "审计", exact: true })).toBeVisible();
   await page.locator(".filter-bar input").first().fill(runId ?? "");
   await page.locator(".filter-bar button").click();
   await expect(page.getByText("approval.denied", { exact: true })).toBeVisible();

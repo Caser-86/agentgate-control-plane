@@ -1,7 +1,7 @@
 from datetime import timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -285,15 +285,52 @@ def test_side_effect_uncertain_work_crash_becomes_manual_review(tmp_path) -> Non
     import sys
 
     sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "worker"))
+    from agentgate_worker.client import WorkerClient, WorkerCredentials
     from agentgate_worker.journal import WorkerJournal
+    from agentgate_worker.vault import WorkerVault
 
     engine = _engine()
     worker_id = uuid4()
     journal = WorkerJournal(tmp_path / "native-worker-journal.db")
     host_calls: list[str] = []
 
-    def noop_handler() -> None:
-        host_calls.append("must not run")
+    class FakeProtector:
+        def protect(self, value: bytes) -> bytes:
+            return value
+
+        def unprotect(self, value: bytes) -> bytes:
+            return value
+
+    class ProtocolTransport:
+        def request(self, method, path, *, headers, json):
+            del method, headers
+            with Session(engine) as transport_session:
+                if path == "/api/v1/worker/claim":
+                    claimed_task = claim_worker_task(
+                        transport_session,
+                        worker_id=worker_id,
+                        protocol_version=json["protocol_version"],
+                        capabilities=json["capabilities"],
+                    )
+                    if claimed_task is None:
+                        return {}
+                    return {
+                        "task_id": str(claimed_task.id),
+                        "idempotency_key": claimed_task.idempotency_key,
+                        "request_digest": request_digest(claimed_task),
+                        "lease_expires_at": claimed_task.lease_expires_at,
+                        "payload": claimed_task.payload,
+                    }
+                if path.endswith("/start"):
+                    start_worker_task(
+                        transport_session,
+                        task_id=UUID(path.split("/")[-2]),
+                        worker_id=worker_id,
+                        protocol_version=json["protocol_version"],
+                        request_digest_value=json["request_digest"],
+                    )
+                    return {}
+            raise AssertionError(f"unexpected native Worker request: {path}")
 
     with Session(engine) as session:
         session.add(
@@ -315,30 +352,31 @@ def test_side_effect_uncertain_work_crash_becomes_manual_review(tmp_path) -> Non
             side_effect_certainty=SideEffectCertainty.POSSIBLE,
         )
         session.commit()
-        claimed = claim_worker_task(
-            session,
-            worker_id=worker_id,
-            protocol_version=PROTOCOL_VERSION,
-            capabilities=["platform.self_check"],
+        vault = WorkerVault(
+            tmp_path / "native-worker-credentials.bin", protector=FakeProtector()
         )
+        vault.save(WorkerCredentials(str(worker_id), "fake-native-token", PROTOCOL_VERSION))
+        client = WorkerClient(
+            base_url="http://fake-native.invalid",
+            vault=vault,
+            journal=journal,
+            worker_name="fake-native-crash-worker",
+            worker_version="test",
+            capabilities={"platform.self_check"},
+            transport=ProtocolTransport(),
+        )
+        claimed = client.claim()
         assert claimed is not None
-        digest = request_digest(claimed)
-        start_worker_task(
-            session,
-            task_id=claimed.id,
-            worker_id=worker_id,
-            protocol_version=PROTOCOL_VERSION,
-            request_digest_value=digest,
-        )
+        digest = claimed.request_digest
+        client.start(claimed)
         session.refresh(task)
         assert task.status is TaskStatus.RUNNING
         assert session.get(WorkerExecutionGrant, task.id) is not None
-        assert callable(noop_handler)  # Phase 0 protocol has no host-side dispatch.
 
-        # The native Worker has started its no-op handler and durably journaled
-        # uncertainty; the connection-loss seam models a process crash before
-        # the completion/report request can reach the API.
-        journal.record_started(str(task.id), digest, task.lease_expires_at)
+        def noop_handler() -> None:
+            host_calls.append("reached-started-boundary")
+
+        noop_handler()
         journal.record_result(
             str(task.id), {"status": "unknown", "detail": "crashed after start"}
         )
@@ -369,4 +407,4 @@ def test_side_effect_uncertain_work_crash_becomes_manual_review(tmp_path) -> Non
         session.refresh(task)
         assert task.status is TaskStatus.MANUAL_REVIEW
         assert task.result is None
-        assert host_calls == []
+        assert host_calls == ["reached-started-boundary"]

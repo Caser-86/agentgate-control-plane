@@ -33,7 +33,7 @@ export function RunDetailPage() {
   return (
     <div className="page-shell detail-page">
       <Link className="back-link" to="/">← 返回运行列表</Link>
-      <div className="page-heading detail-heading"><div><span className="eyebrow">运行详情 / {detail.id.slice(0, 8)}</span><h1>操作追踪</h1><p>{detail.user_request}</p></div><div className="detail-status"><StatusBadge value={detail.status} /><span className={connection === "reconnecting" ? "reconnecting" : "live-status"}>{connection === "reconnecting" ? "正在重新连接事件" : "事件流已连接"}</span></div></div>
+      <div className="page-heading detail-heading"><div><span className="eyebrow">运行详情 / {detail.id.slice(0, 8)}</span><h1>操作追踪</h1><p>{detail.user_request}</p></div><div className="detail-status" data-testid="run-status"><StatusBadge value={detail.status} /><span className={connection === "reconnecting" ? "reconnecting" : "live-status"}>{connection === "reconnecting" ? "正在重新连接事件" : "事件流已连接"}</span></div></div>
       {pending && <ApprovalCard action={pending} onApprove={async () => { await api.approveAction(pending.id, { actor: "local-user" }); await load(); }} onDeny={async () => { await api.denyAction(pending.id, { actor: "local-user" }); await load(); }} onRefresh={() => void load()} />}
       <div className="detail-grid">
         <section className="panel timeline-panel"><div className="section-heading"><div><span className="eyebrow">追踪 / 按时间</span><h2>决定时间线</h2></div><span className="mono-note">{detail.audit_events.length.toString().padStart(2, "0")} 条事件</span></div><RunTimeline events={detail.audit_events} /></section>

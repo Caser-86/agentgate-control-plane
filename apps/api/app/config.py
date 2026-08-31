@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://agentgate:agentgate@postgres:5432/agentgate"
     database_migration_required: bool = True
     worker_lease_seconds: int = 30
+    worker_ready_file: str | None = None
+    e2e_reset_database: bool = False
     outbox_batch_size: int = 100
     auth_bootstrap_token_file: str = "/app/data/bootstrap-token"
     auth_bootstrap_ttl_seconds: int = 900

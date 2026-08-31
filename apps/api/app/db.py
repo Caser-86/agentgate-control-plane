@@ -34,6 +34,12 @@ def create_db_and_tables(engine: Engine) -> None:
     SQLModel.metadata.create_all(engine)
 
 
+def reset_db_and_tables(engine: Engine) -> None:
+    """Reset the disposable SQLite database used by a bounded E2E project."""
+    SQLModel.metadata.drop_all(engine)
+    SQLModel.metadata.create_all(engine)
+
+
 def _alembic_config(database_url: str) -> Config:
     api_root = Path(__file__).resolve().parent.parent
     config = Config(str(api_root / "alembic.ini"))

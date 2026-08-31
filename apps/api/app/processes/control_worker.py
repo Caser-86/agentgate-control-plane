@@ -6,6 +6,7 @@ import threading
 import time
 from collections.abc import Callable
 from datetime import datetime
+from pathlib import Path
 from typing import Any, cast
 from uuid import UUID, uuid4
 
@@ -103,6 +104,11 @@ class ControlWorker:
         except RuntimeError as error:
             logger.error("control_worker_configuration_error", exc_info=False)
             raise SystemExit(2) from error
+        ready_file = self.settings.worker_ready_file
+        if self.settings.environment == "test" and ready_file:
+            ready_path = Path(ready_file)
+            ready_path.parent.mkdir(parents=True, exist_ok=True)
+            ready_path.write_text("control-worker-ready\n", encoding="utf-8")
         while True:
             if self.run_once() == 0:
                 time.sleep(self.poll_seconds)
