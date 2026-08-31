@@ -1,23 +1,52 @@
 """Small durable scheduler loop: recover expired leases and surface due work."""
 
 import time
+from collections.abc import Iterable, Mapping
 from datetime import timedelta
 from typing import Any, cast
 
 from sqlmodel import Session, select
 
 from app.config import get_settings
-from app.control.enums import SideEffectCertainty, TaskStatus
+from app.control.enums import SideEffectCertainty, TaskKind, TaskStatus
 from app.control.models import ControlTask
-from app.control.repositories import MAX_RECOVERY_ATTEMPTS, MAX_RECOVERY_BACKOFF_SECONDS
+from app.control.repositories import (
+    MAX_RECOVERY_ATTEMPTS,
+    MAX_RECOVERY_BACKOFF_SECONDS,
+    enqueue_task,
+)
 from app.db import get_engine
 from app.models import utc_now
 
 
-def run_once() -> int:
+def _enqueue_due_tasks(session: Session, due_tasks: Iterable[Mapping[str, object]]) -> int:
+    enqueued = 0
+    for due_task in due_tasks:
+        enqueue_task(
+            session,
+            kind=cast(TaskKind, due_task["kind"]),
+            payload=cast(dict[str, object], due_task["payload"]),
+            idempotency_key=cast(str, due_task["idempotency_key"]),
+            capability=cast(str, due_task["capability"]),
+            run_id=cast(Any, due_task.get("run_id")),
+        )
+        enqueued += 1
+    return enqueued
+
+
+def enqueue_due_tasks(due_tasks: Iterable[Mapping[str, object]]) -> int:
+    """Persist due task specifications through the durable idempotent queue."""
+    with Session(get_engine()) as session:
+        enqueued = _enqueue_due_tasks(session, due_tasks)
+        session.commit()
+    return enqueued
+
+
+def run_once(due_tasks: Iterable[Mapping[str, object]] = ()) -> int:
     now = utc_now()
     changed = 0
     with Session(get_engine()) as session:
+        changed += _enqueue_due_tasks(session, due_tasks)
         tasks = session.exec(
             cast(
                 Any,

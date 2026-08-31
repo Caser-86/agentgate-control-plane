@@ -23,6 +23,8 @@ def test_scheduler_and_worker_have_distinct_durable_roles() -> None:
     assert "due-task" in COMPOSE or "due_task" in COMPOSE or "scheduler" in COMPOSE
     assert "lease" in COMPOSE
     assert "app.processes.control_worker" in COMPOSE
+    assert "app.processes.scheduler" in COMPOSE
+    assert "AGENTGATE_WORKER_ROLE: durable-control-task-processor" in COMPOSE
 
 
 def test_local_scripts_run_migrations_before_services_and_use_npm_cmd() -> None:
@@ -30,6 +32,8 @@ def test_local_scripts_run_migrations_before_services_and_use_npm_cmd() -> None:
     assert "migrate-local.ps1" in start_script
     assert "npm.cmd" in start_script
     assert start_script.index("migrate-local.ps1") < start_script.index("docker compose up -d api")
+    verify_script = (REPO_ROOT / "scripts/verify-foundation.ps1").read_text(encoding="utf-8")
+    assert "database_migration_current" in verify_script
 
 
 def test_required_task7_operator_scripts_exist() -> None:

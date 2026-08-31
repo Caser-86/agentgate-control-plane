@@ -1,4 +1,5 @@
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 
 from tests.conftest import authenticate_client
 
@@ -39,3 +40,35 @@ def test_platform_self_check_exposes_bounded_operational_metadata_without_secret
     assert body["provider"]["name"]
     assert "api_key" not in response.text
     assert "bootstrap" not in response.text.lower()
+
+
+def test_platform_self_check_rejects_a_stale_database_revision(
+    auth_client: tuple[TestClient, object, object]
+) -> None:
+    client, engine, token_file = auth_client
+    authenticate_client(client, token_file)
+    with engine.begin() as connection:
+        connection.execute(
+            text("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)")
+        )
+        connection.execute(
+            text("INSERT INTO alembic_version(version_num) VALUES ('0005_worker_protocol')")
+        )
+
+    response = client.get("/api/platform/self-check")
+
+    assert response.status_code == 200
+    assert response.json()["migration_check"]["code"] == "database_migration_mismatch"
+    assert response.json()["migration_check"]["status"] == "error"
+
+
+def test_platform_self_check_reports_a_missing_database_revision(
+    auth_client: tuple[TestClient, object, object]
+) -> None:
+    client, _, token_file = auth_client
+    authenticate_client(client, token_file)
+
+    response = client.get("/api/platform/self-check")
+
+    assert response.status_code == 200
+    assert response.json()["migration_check"]["code"] == "database_migration_missing"

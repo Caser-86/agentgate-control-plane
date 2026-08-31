@@ -94,15 +94,54 @@ def _heartbeat_age_seconds(value: datetime | None) -> float | None:
 
 
 def platform_self_check(session: Session, settings: Settings) -> dict[str, object]:
-    migration_head = "unknown"
+    migration_head: str | None = None
+    code_migration_head: str | None = None
+    applied_migration_revision: str | None = None
     try:
         from alembic.config import Config
+        from alembic.runtime.migration import MigrationContext
         from alembic.script import ScriptDirectory
 
         config = Config(str(Path(__file__).resolve().parents[2] / "alembic.ini"))
-        migration_head = ScriptDirectory.from_config(config).get_current_head() or "unknown"
+        code_migration_head = ScriptDirectory.from_config(config).get_current_head()
+        with cast(Any, session.get_bind()).connect() as connection:
+            applied_migration_revision = MigrationContext.configure(
+                connection
+            ).get_current_revision()
+        migration_head = applied_migration_revision
     except Exception:
-        migration_head = "unknown"
+        pass
+
+    if code_migration_head is None:
+        migration_check = check(
+            status="error",
+            code="database_migration_head_unavailable",
+            message_zh="无法读取代码迁移头",
+        )
+    elif applied_migration_revision is None:
+        migration_check = check(
+            status="error",
+            code="database_migration_missing",
+            message_zh="数据库没有已应用的迁移",
+            details={"code_head": code_migration_head},
+        )
+    elif applied_migration_revision != code_migration_head:
+        migration_check = check(
+            status="error",
+            code="database_migration_mismatch",
+            message_zh="数据库迁移版本与代码不一致",
+            details={
+                "applied_revision": applied_migration_revision,
+                "code_head": code_migration_head,
+            },
+        )
+    else:
+        migration_check = check(
+            status="ok",
+            code="database_migration_current",
+            message_zh="数据库迁移版本正确",
+            details={"applied_revision": applied_migration_revision},
+        )
 
     queued = session.exec(
         cast(
@@ -139,6 +178,7 @@ def platform_self_check(session: Session, settings: Settings) -> dict[str, objec
     ).all()
     return {
         "migration_head": migration_head,
+        "migration_check": migration_check,
         "queue_latency_ms": queue_latency_ms,
         "stale_lease_count": len(stale_leases),
         "worker_heartbeat_age_seconds": _heartbeat_age_seconds(

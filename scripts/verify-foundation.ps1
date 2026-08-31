@@ -15,7 +15,7 @@ if ($health.status -ne "ok") { throw "API health check failed." }
 $auth = Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/auth/status" -TimeoutSec 5
 if ($null -eq $auth.setup_required) { throw "Authentication status check failed." }
 $platform = Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/platform/self-check" -TimeoutSec 5
-if ([string]::IsNullOrWhiteSpace([string]$platform.migration_head) -or $platform.migration_head -eq "unknown") { throw "Migration head is missing." }
+if ($null -eq $platform.migration_check -or $platform.migration_check.status -ne "ok" -or $platform.migration_check.code -ne "database_migration_current") { throw "Database migration is missing or stale." }
 if ($platform.stale_lease_count -gt 0) { throw "A stale queue lease requires scheduler cleanup." }
 if ($null -eq $platform.worker_heartbeat_age_seconds -or $platform.worker_heartbeat_age_seconds -gt $MaxHeartbeatAgeSeconds) { throw "Worker heartbeat is missing or stale." }
 if ($platform.PSObject.Properties.Name -contains "api_key") { throw "Self-check exposed a secret field." }
