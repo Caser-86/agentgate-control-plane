@@ -26,12 +26,25 @@ class Settings(BaseSettings):
     auth_bootstrap_ttl_seconds: int = 900
     auth_session_ttl_seconds: int = 28800
     auth_cookie_secure: bool = False
+    api_port: int = Field(default=8000, ge=1, le=65535)
+    web_port: int = Field(default=5173, ge=1, le=65535)
     environment: str = Field(default="production", validation_alias="AGENTGATE_ENV")
     seed_demo: bool = Field(default=False, validation_alias="AGENTGATE_SEED_DEMO")
     max_steps: int = 8
     tool_timeout_seconds: int = 10
     run_timeout_seconds: int = 120
-    web_origin: str = "http://localhost:5173"
+
+    @property
+    def api_base_url(self) -> str:
+        return f"http://localhost:{self.api_port}"
+
+    @property
+    def web_origin(self) -> str:
+        return f"http://localhost:{self.web_port}"
+
+    @property
+    def web_origins(self) -> list[str]:
+        return [self.web_origin, f"http://127.0.0.1:{self.web_port}"]
 
 
 @lru_cache

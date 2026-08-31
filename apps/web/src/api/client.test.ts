@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { api, eventStreamUrl } from "./client";
+import { api, eventStreamUrl, resolveApiBaseUrl } from "./client";
 
 describe("api client", () => {
   afterEach(() => vi.restoreAllMocks());
@@ -24,5 +24,11 @@ describe("api client", () => {
     expect(eventStreamUrl("run/a", 42)).toBe(
       "http://localhost:8000/api/runs/run%2Fa/events?after=42",
     );
+  });
+
+  it("uses the configured alternate API port rather than a stale default", () => {
+    const runtimeConfig = { apiBaseUrl: "http://localhost:18000" };
+    expect(resolveApiBaseUrl(runtimeConfig)).toBe("http://localhost:18000");
+    expect(resolveApiBaseUrl(runtimeConfig)).not.toBe("http://localhost:8000");
   });
 });

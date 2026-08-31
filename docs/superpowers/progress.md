@@ -1,5 +1,13 @@
 # Final integration fixes progress
 
+## Final local port/Worker fix pass — 2026-09-01
+
+- [x] Unified `AGENTGATE_API_PORT`/`AGENTGATE_WEB_PORT` across Compose loopback bindings, API CORS, Vite dev proxy, and built Web runtime config; safe defaults remain localhost-only and remote targets remain unsupported.
+- [x] Fixed native Worker startup/setup/verification to use `apps/worker/.venv` with `win32crypt`/pywin32 validation and Compose-derived API loopback URL/port.
+- [x] Added alternate-port, stale-built-URL, Worker-runtime, and script contract coverage.
+- [x] Fresh local evidence: backend `169 passed, 5 skipped`, Ruff/mypy/evals pass; frontend lint/typecheck/build pass and `7 files / 14 tests passed`; Worker `8 passed`; Compose default/alternate config and PowerShell parsing pass.
+- [ ] Live Compose foundation verification remains unavailable without starting services; the bounded read-only attempt failed at API health because the API was not running. PostgreSQL tests remain skipped without `AGENTGATE_TEST_DATABASE_URL`.
+
 基线目标提交：`70df1d7`（隔离工作树 `codex/reliable-foundation-20260831`）。
 
 已完成：

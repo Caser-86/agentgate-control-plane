@@ -37,7 +37,7 @@ See [the detailed architecture](docs/architecture.md) for state machines, approv
 
 ## 60-second quick start
 
-要求：Windows、Docker Desktop、Python 3.11+、Node.js 24+ 和 PowerShell。Compose 只绑定本机：Web 为 `127.0.0.1:5173`，API 为 `127.0.0.1:8000`，PostgreSQL 不发布宿主机端口。
+要求：Windows、Docker Desktop、Python 3.11+、Node.js 24+ 和 PowerShell。Compose 默认只绑定本机：Web 为 `127.0.0.1:5173`，API 为 `127.0.0.1:8000`，PostgreSQL 不发布宿主机端口。需要换端口时，只设置 `AGENTGATE_API_PORT` 和 `AGENTGATE_WEB_PORT`；它们同时驱动 Compose loopback 端口、API CORS、Vite 开发代理和 Web 运行时 API 地址。仅支持 localhost/loopback，不支持远程 target。
 
 ```powershell
 Set-Location apps/api
@@ -54,6 +54,7 @@ Set-Location ..\..
 手动迁移：`powershell -File .\scripts\migrate-local.ps1`。基础设施验收：`powershell -File .\scripts\verify-foundation.ps1`。Windows 前端命令统一使用 `npm.cmd`。
 
 原生 Worker 使用本地专用虚拟环境 `apps/worker/.venv`，不会复用 API 的 `.venv`。首次运行 `setup-local.ps1` 会幂等地创建该环境并执行 `pip install -e apps/worker`（包含 Windows `pywin32`/`win32crypt` 依赖）；验收脚本会检查解释器和依赖，缺失时给出同一 setup 命令。API/Web 的实际 loopback host 端口由 Compose 的 `AGENTGATE_API_PORT`/`AGENTGATE_WEB_PORT`（默认 8000/5173）解析，脚本不会假定 host 端口。
+手动启动原生 Worker 使用 `powershell -File .\scripts\start-worker.ps1`；不传参数时它从 `docker compose config --format json` 派生实际 API loopback 端口，也可传 `-ApiPort` 或本机 `-ApiUrl http://127.0.0.1:<port>`。远程 URL 会被拒绝。
 
 ## Live OpenAI-compatible configuration
 

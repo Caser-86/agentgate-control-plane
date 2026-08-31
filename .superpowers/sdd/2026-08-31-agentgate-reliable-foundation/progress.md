@@ -92,3 +92,10 @@ Every planned task is represented below. A row exists for each task's own consis
 - [x] Localized RunDetailPage loading/error/failed-run copy into Chinese fixed safe text and added a regression proving underlying exception text is not exposed.
 - [x] Fresh evidence: backend `157 passed, 5 skipped`; Ruff/mypy/evals pass; frontend `7 files, 13 tests`/lint/typecheck/build pass; Compose config and PowerShell AST pass; bounded E2E `2 passed` on `18220/18221`.
 - [ ] Foundation live verification remains unavailable: Bypass run failed at line 29 with `API health check failed.` because the Compose API was not running. PostgreSQL race coverage remains skipped because `AGENTGATE_TEST_DATABASE_URL` is unset. No persistent/user database or service restart was used.
+
+## Final port and Worker runtime fix pass — 2026-09-01
+
+- [x] Port contract derives Compose loopback bindings, API CORS, Vite dev configuration, and built Web runtime API URL from `AGENTGATE_API_PORT`/`AGENTGATE_WEB_PORT` with localhost defaults.
+- [x] Native Worker startup/setup/verification use `apps/worker/.venv`, validate `win32crypt`, derive the API port from rendered Compose config, and reject remote URLs.
+- [x] Fresh evidence: API `169 passed, 5 skipped`, Ruff/mypy/evals pass; Web lint/typecheck/build pass with `7 files / 14 tests`; Worker `8 passed`; default/alternate Compose config, PowerShell parse, and diff check pass.
+- [ ] No Compose lifecycle was run. Read-only foundation verification failed at API health because the stack was not running; PostgreSQL tests remain skipped because `AGENTGATE_TEST_DATABASE_URL` is unset.

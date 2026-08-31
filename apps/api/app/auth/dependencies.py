@@ -65,7 +65,7 @@ def require_csrf(request: Request, session: SessionDep) -> Operator:
     operator = require_operator(request, session)
     raw_session_token = request.cookies.get(SESSION_COOKIE)
     csrf_token = request.headers.get("X-CSRF-Token")
-    valid_origin = request.headers.get("Origin") == get_settings().web_origin
+    valid_origin = request.headers.get("Origin") in get_settings().web_origins
     if not valid_origin or not raw_session_token or not csrf_token:
         raise _auth_error(403, "csrf_validation_failed")
     web_session = session.exec(

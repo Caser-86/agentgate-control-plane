@@ -1,3 +1,6 @@
+import json
+import os
+import subprocess
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -32,6 +35,42 @@ def test_postgres_has_no_published_host_port() -> None:
 def test_api_and_web_bind_only_to_loopback() -> None:
     assert '"127.0.0.1:${AGENTGATE_API_PORT:-8000}:8000"' in COMPOSE
     assert '"127.0.0.1:${AGENTGATE_WEB_PORT:-5173}:80"' in COMPOSE
+
+
+def test_alternate_ports_render_consistently_through_compose() -> None:
+    env = os.environ.copy()
+    env.update({"AGENTGATE_API_PORT": "18000", "AGENTGATE_WEB_PORT": "15173"})
+    result = subprocess.run(
+        ["docker", "compose", "config", "--format", "json"],
+        cwd=REPO_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    config = json.loads(result.stdout)
+    api = config["services"]["api"]
+    web = config["services"]["web"]
+    assert api["ports"] == [
+        {
+            "mode": "ingress",
+            "target": 8000,
+            "published": "18000",
+            "protocol": "tcp",
+            "host_ip": "127.0.0.1",
+        }
+    ]
+    assert web["ports"] == [
+        {
+            "mode": "ingress",
+            "target": 80,
+            "published": "15173",
+            "protocol": "tcp",
+            "host_ip": "127.0.0.1",
+        }
+    ]
+    assert api["environment"]["AGENTGATE_WEB_PORT"] == "15173"
+    assert web["environment"]["AGENTGATE_API_BASE_URL"] == "http://localhost:18000"
 
 
 def test_local_scripts_derive_configured_host_ports() -> None:
@@ -80,6 +119,29 @@ def test_foundation_verification_starts_worker_before_heartbeat_gate() -> None:
     )
     assert "state-dir" in verify_script
     assert "Remove-Item" in verify_script
+
+
+def test_start_worker_uses_worker_venv_and_configured_loopback_api() -> None:
+    script = (REPO_ROOT / "scripts/start-worker.ps1").read_text(encoding="utf-8")
+    assert 'Join-Path $PSScriptRoot "..\\apps\\worker"' in script
+    assert 'Join-Path $workerRoot ".venv\\Scripts\\python.exe"' in script
+    assert 'apps\\api\\.venv\\Scripts\\python.exe' not in script
+    assert "AGENTGATE_API_PORT" in script
+    assert "127.0.0.1:$ApiPort" in script
+    assert "localhost" in script
+    assert "remote" in script.lower()
+    assert "docker compose config --format json" in script
+    assert "import win32crypt" in script
+
+
+def test_built_web_uses_runtime_config_without_stale_port_fallback() -> None:
+    dockerfile = (REPO_ROOT / "apps/web/Dockerfile").read_text(encoding="utf-8")
+    client = (REPO_ROOT / "apps/web/src/api/client.ts").read_text(encoding="utf-8")
+    template = (REPO_ROOT / "apps/web/config.js.template").read_text(encoding="utf-8")
+    assert "ARG VITE_API_BASE_URL=" in dockerfile
+    assert "localhost:8000" not in dockerfile
+    assert '?? "http://localhost:8000"' not in client
+    assert "AGENTGATE_API_BASE_URL" in template
 
 
 def test_required_task7_operator_scripts_exist() -> None:

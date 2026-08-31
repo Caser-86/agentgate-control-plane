@@ -117,3 +117,5 @@ sequenceDiagram
 ## Local-demo limitations and production path
 
 Phase 0 is deliberately local-only: Compose binds Web/API to loopback, PostgreSQL has no published host port, and no real host action exists. The API exposes health/self-check data without secrets; the scheduler recovers durable leases and the control-worker processes persisted control tasks. The native Windows Worker remains usable outside Docker for the safe `platform.self_check` protocol. Real service restarts, arbitrary shell/PowerShell, file writes and secret operations belong to later phases and are not implemented here.
+
+Local port contract: `AGENTGATE_API_PORT` defaults to `8000` and `AGENTGATE_WEB_PORT` defaults to `5173`. Compose publishes only `127.0.0.1:<port>`; the API derives CORS origins from the Web port, Vite derives its dev proxy and API base from the API port, and the built Web container writes its runtime API base from the same Compose-derived value. Only `localhost`/`127.0.0.1` targets are supported.

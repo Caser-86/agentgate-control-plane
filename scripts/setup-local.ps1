@@ -18,6 +18,8 @@ if (-not (Test-Path -LiteralPath $workerPython)) {
 }
 & $workerPython -m pip install -e $workerRoot
 if ($LASTEXITCODE -ne 0) { throw "Could not install apps/worker dependencies into apps/worker/.venv." }
+& $workerPython -c "import win32crypt; import agentgate_worker"
+if ($LASTEXITCODE -ne 0) { throw "apps/worker/.venv is missing win32crypt/pywin32; rerun .\scripts\setup-local.ps1." }
 Push-Location $webRoot
 npm.cmd ci
 if ($LASTEXITCODE -ne 0) { Pop-Location; throw "npm.cmd ci failed." }

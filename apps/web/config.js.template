@@ -1,0 +1,1 @@
+window.__AGENTGATE_CONFIG__ = { apiBaseUrl: "${AGENTGATE_API_BASE_URL}" };

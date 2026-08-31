@@ -21,3 +21,12 @@
 ## Limitations
 
 本报告不宣称修正后的 Compose migration、bounded browser E2E、live `verify-foundation.ps1` 或 disposable PostgreSQL 已通过；本轮未启动用户服务，且需要隔离 Postgres 与可控运行态后重新运行。详细 Task 8 证据见 [task-8-report.md](task-8-report.md)。
+
+## Final port and Worker runtime fix pass — 2026-09-01
+
+- Added one local port contract: `AGENTGATE_API_PORT`/`AGENTGATE_WEB_PORT` default to `8000`/`5173`; Compose publishes loopback ports, API derives CORS origins, Vite derives dev proxy/API base, and the built Web image writes its runtime API base from `AGENTGATE_API_BASE_URL`.
+- Alternate-port/config/client regression coverage: `16 passed`; rendered `18000/15173` values align across published ports, API Web port, and Web runtime API URL.
+- `start-worker.ps1` now uses `apps/worker/.venv`, validates `win32crypt`, derives the API port from rendered Compose config, and rejects non-loopback URLs. Setup validates the same environment; `verify-foundation.ps1` uses it and never prints token contents.
+- Fresh backend: `169 passed, 5 skipped`; Ruff/mypy/evals pass. Fresh frontend: lint/typecheck/build pass; Vitest `7 files / 14 tests passed`. Worker: `8 passed` plus `win32crypt` import. Default/alternate Compose config, PowerShell parse, and `git diff --check` passed.
+
+Limitations: no Compose services were started or stopped. A read-only `verify-foundation.ps1` attempt failed at API health because the stack was not running; no live foundation verification, Docker image build, or PostgreSQL runtime test is claimed. Bounded temporary E2E previously completed with `2 passed` on `18220/18221`.

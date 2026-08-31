@@ -31,7 +31,8 @@ services:
     environment:
       AGENTGATE_LLM_PROVIDER: ${AGENTGATE_LLM_PROVIDER:-mock}
       AGENTGATE_DATABASE_URL: postgresql+psycopg://agentgate:${AGENTGATE_POSTGRES_PASSWORD:-agentgate}@postgres:5432/agentgate
-      AGENTGATE_WEB_ORIGIN: ${AGENTGATE_WEB_ORIGIN:-http://localhost:5173}
+      AGENTGATE_API_PORT: ${AGENTGATE_API_PORT:-8000}
+      AGENTGATE_WEB_PORT: ${AGENTGATE_WEB_PORT:-5173}
     volumes:
       - ./data:/app/data
     depends_on:
@@ -79,7 +80,9 @@ services:
     build:
       context: ./apps/web
       args:
-        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
+    environment:
+      AGENTGATE_API_BASE_URL: http://localhost:${AGENTGATE_API_PORT:-8000}
     depends_on:
       api:
         condition: service_healthy

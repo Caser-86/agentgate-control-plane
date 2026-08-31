@@ -33,7 +33,8 @@ const webServers = serverState.flatMap((project) => {
     AGENTGATE_AUTH_BOOTSTRAP_TOKEN_FILE: project.bootstrapToken,
     AGENTGATE_WORKER_READY_FILE: project.workerReady,
     AGENTGATE_E2E_RESET_DATABASE: "true",
-    AGENTGATE_WEB_ORIGIN: `http://127.0.0.1:${project.webPort}`,
+    AGENTGATE_API_PORT: String(project.apiPort),
+    AGENTGATE_WEB_PORT: String(project.webPort),
   };
   return [
     {
