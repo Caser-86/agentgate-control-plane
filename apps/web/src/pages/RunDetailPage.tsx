@@ -41,7 +41,7 @@ export function RunDetailPage() {
       </div>
       {detail.final_text && <section className="panel final-panel"><span className="eyebrow">Agent 结论</span><h2>安全结果</h2><p>{detail.final_text}</p></section>}
       {detail.status === "failed" && <section className="error-panel"><span className="eyebrow">安全错误</span><h2>运行在完成前停止</h2><p>{detail.error_message ?? "运行触达受保护的失败边界。"}</p></section>}
-      <section className="panel actions-panel"><div className="section-heading"><div><span className="eyebrow">工具操作</span><h2>操作账本</h2></div></div><div className="action-list">{detail.actions.map((action) => <div className="action-row" key={action.id}><div><strong>{action.tool_name}</strong><span>{action.reason}</span></div><div className="action-meta"><StatusBadge value={action.risk_level} /><StatusBadge value={action.status} /></div><details><summary>参数</summary><pre>{formatArguments(action.arguments)}</pre></details>{action.result !== null && <details><summary>结果</summary><pre>{formatArguments(action.result)}</pre></details>}</div>)}</div></section>
+      <section className="panel actions-panel"><div className="section-heading"><div><span className="eyebrow">工具操作</span><h2>操作账本</h2></div></div><div className="action-list">{detail.actions.map((action) => <div className="action-row" key={action.id}><div><strong>{action.tool_name}</strong><span>{action.reason}</span></div><div className="action-meta"><StatusBadge value={action.risk_level} /><span data-testid="action-status"><StatusBadge value={action.status} /></span></div><details><summary>参数</summary><pre>{formatArguments(action.arguments)}</pre></details>{action.result !== null && <details><summary>结果</summary><pre>{formatArguments(action.result)}</pre></details>}</div>)}</div></section>
     </div>
   );
 }

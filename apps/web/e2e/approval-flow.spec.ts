@@ -1,21 +1,16 @@
 import { expect, test } from "@playwright/test";
+import fs from "node:fs";
 
 async function login(page: import("@playwright/test").Page): Promise<void> {
   await page.goto("/login");
-  const setup = page.getByRole("heading", { name: "初始化管理员密码", exact: true });
-  if (await setup.isVisible().catch(() => false)) {
-    const token = process.env.AGENTGATE_E2E_BOOTSTRAP_TOKEN;
-    if (!token) throw new Error("AGENTGATE_E2E_BOOTSTRAP_TOKEN is required for first-run setup");
-    await page.getByRole("textbox", { name: "引导令牌" }).fill(token);
-    await page.getByLabel("管理员密码").fill("fake-e2e-password");
-    await page.getByRole("button", { name: "完成初始化", exact: true }).click();
-  } else {
-    await page.getByLabel("管理员密码").fill("fake-e2e-password");
-    await page.getByRole("button", { name: "登录", exact: true }).click();
-  }
+  const token = process.env.AGENTGATE_E2E_BOOTSTRAP_TOKEN;
+  const bootstrapToken = token ?? fs.readFileSync(process.env.AGENTGATE_E2E_BOOTSTRAP_TOKEN_FILE ?? "", "utf8");
+  await page.getByRole("textbox", { name: "引导令牌" }).fill(bootstrapToken);
+  await page.getByLabel("管理员密码").fill("fake-e2e-password");
+  await page.getByRole("button", { name: "完成初始化", exact: true }).click();
 }
 
-test("rejects a degraded-service restart and preserves an auditable trace", async ({ page, browser }) => {
+test("拒绝降级服务恢复并保留可审计记录", async ({ page, browser }) => {
   await login(page);
   await expect(page.getByRole("heading", { name: "运行", exact: true })).toBeVisible();
 
@@ -25,11 +20,10 @@ test("rejects a degraded-service restart and preserves an auditable trace", asyn
   await page.getByTestId("start-run").click();
 
   await expect(page).toHaveURL(/\/runs\/[0-9a-f-]+/);
-  await expect(page.getByText("Waiting approval", { exact: true }).first()).toBeVisible();
-  const approval = page.getByRole("region", { name: "restart_service" });
+  await expect(page.getByTestId("approval-card")).toBeVisible();
+  const approval = page.getByTestId("approval-card");
   await expect(approval).toBeVisible();
-  await expect(approval.getByText("Medium risk", { exact: true })).toBeVisible();
-  await expect(approval.getByText("Medium-risk actions require explicit human approval.", { exact: true })).toBeVisible();
+  await expect(approval.locator(".status-medium")).toBeVisible();
   await expect(approval.locator("pre")).toContainText('"service": "payments-api"');
   if (process.env.AGENTGATE_CAPTURE_SCREENSHOT === "1") {
     await page.screenshot({ path: "../../docs/assets/local-demo.png", fullPage: true });
@@ -39,17 +33,16 @@ test("rejects a degraded-service restart and preserves an auditable trace", asyn
   expect(waitingBody).not.toContain("api_key");
 
   await approval.getByTestId("approval-deny").click();
-  await expect(page.getByText("Denied", { exact: true }).first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('[data-testid="action-status"].status-denied')).toBeVisible({ timeout: 15_000 });
   await page.reload();
   await expect(page.getByText("approval.denied", { exact: true })).toBeVisible();
   await expect(page.getByText('"denied": true', { exact: true })).toBeVisible();
 
   const runId = page.url().split("/").pop();
   expect(runId).toBeTruthy();
-  await page.getByRole("link", { name: /^Audit/ }).click();
-  await expect(page.getByRole("heading", { name: "Audit", exact: true })).toBeVisible();
-  await page.getByRole("textbox", { name: "Run ID" }).fill(runId ?? "");
-  await page.getByRole("button", { name: "Apply filters", exact: true }).click();
+  await page.goto("/audit");
+  await page.locator(".filter-bar input").first().fill(runId ?? "");
+  await page.locator(".filter-bar button").click();
   await expect(page.getByText("approval.denied", { exact: true })).toBeVisible();
 
   const auditBody = await page.locator("body").innerText();

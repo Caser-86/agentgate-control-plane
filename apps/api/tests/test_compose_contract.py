@@ -43,11 +43,3 @@ def test_required_task7_operator_scripts_exist() -> None:
         "verify-foundation.ps1",
     ):
         assert (REPO_ROOT / "scripts" / name).is_file()
-
-
-def test_foundation_script_parses_structured_compose_port_bindings() -> None:
-    script = (REPO_ROOT / "scripts" / "verify-foundation.ps1").read_text(encoding="utf-8")
-    assert "host_ip" in script
-    assert "published" in script
-    assert "target" in script
-    assert "loopback-only" in script

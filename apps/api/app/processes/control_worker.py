@@ -23,7 +23,7 @@ from app.control.repositories import (
     renew_task_lease,
     start_task,
 )
-from app.db import get_engine
+from app.db import create_db_and_tables, get_engine
 from app.models import RunStatus
 from app.repositories import AuditRepository, RunRepository
 from app.services.agent_loop import AgentRunner
@@ -96,6 +96,8 @@ class ControlWorker:
 
     def run_forever(self) -> None:
         """Run until interrupted; fail fast when provider configuration is invalid."""
+        if self.settings.environment == "test" and str(self.engine.url).startswith("sqlite"):
+            create_db_and_tables(self.engine)
         try:
             build_provider(self.settings)
         except RuntimeError as error:

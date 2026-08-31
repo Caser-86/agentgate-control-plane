@@ -19,7 +19,7 @@ from app.api.v1 import router as v1_router
 from app.api.worker import router as worker_router
 from app.auth.security import ensure_bootstrap_token
 from app.config import get_settings
-from app.db import database_schema_is_ready, get_engine, seed_demo_state
+from app.db import create_db_and_tables, database_schema_is_ready, get_engine, seed_demo_state
 
 settings = get_settings()
 
@@ -31,10 +31,12 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     if settings.database_migration_required and not is_sqlite_test_engine:
         if not database_schema_is_ready(engine):
             raise RuntimeError("database_schema_not_ready: run alembic upgrade head")
+    if is_sqlite_test_engine and settings.environment == "test":
+        create_db_and_tables(engine)
     if settings.environment == "development" and settings.seed_demo:
         with Session(engine) as session:
             seed_demo_state(session)
-    if not is_sqlite_test_engine:
+    if not is_sqlite_test_engine or settings.environment == "test":
         with Session(engine) as session:
             ensure_bootstrap_token(session, settings)
     yield

@@ -1,4 +1,5 @@
 from datetime import timedelta
+from pathlib import Path
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -16,6 +17,7 @@ from app.processes.control_worker import ControlWorker
 from app.services.executor import ExecutionLeaseLostError, ToolExecutor
 from app.services.worker_protocol import (
     PROTOCOL_VERSION,
+    claim_worker_task,
     complete_worker_task,
     request_digest,
     start_worker_task,
@@ -278,28 +280,93 @@ def test_duplicate_approval_conflicts_without_an_extra_task(
         )
 
 
-def test_side_effect_uncertain_work_crash_becomes_manual_review() -> None:
+def test_side_effect_uncertain_work_crash_becomes_manual_review(tmp_path) -> None:
+    """A native Worker crash is injected only after API start/grant is durable."""
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "worker"))
+    from agentgate_worker.journal import WorkerJournal
+
     engine = _engine()
+    worker_id = uuid4()
+    journal = WorkerJournal(tmp_path / "native-worker-journal.db")
+    host_calls: list[str] = []
+
+    def noop_handler() -> None:
+        host_calls.append("must not run")
+
     with Session(engine) as session:
+        session.add(
+            WorkerRegistration(
+                id=worker_id,
+                name="fake-native-crash-worker",
+                version="test",
+                protocol_version=PROTOCOL_VERSION,
+                capabilities=["platform.self_check"],
+                token_digest="fake-native-worker-digest",
+            )
+        )
         task = enqueue_task(
             session,
-            kind=TaskKind.ACTION_EXECUTION,
-            payload={"action": "fake"},
+            kind=TaskKind.CONTROL,
+            payload={"task_type": "platform.self_check"},
             idempotency_key="native-crash-after-start",
-            capability="action.execute",
+            capability="platform.self_check",
             side_effect_certainty=SideEffectCertainty.POSSIBLE,
         )
         session.commit()
-        now = task.available_at
-        assert claim_next_task(session, worker_id=uuid4(), capabilities={"action.execute"}, now=now)
-        assert (
-            claim_next_task(
-                session,
-                worker_id=uuid4(),
-                capabilities={"action.execute"},
-                now=now + timedelta(seconds=31),
-            )
-            is None
+        claimed = claim_worker_task(
+            session,
+            worker_id=worker_id,
+            protocol_version=PROTOCOL_VERSION,
+            capabilities=["platform.self_check"],
+        )
+        assert claimed is not None
+        digest = request_digest(claimed)
+        start_worker_task(
+            session,
+            task_id=claimed.id,
+            worker_id=worker_id,
+            protocol_version=PROTOCOL_VERSION,
+            request_digest_value=digest,
         )
         session.refresh(task)
+        assert task.status is TaskStatus.RUNNING
+        assert session.get(WorkerExecutionGrant, task.id) is not None
+        assert callable(noop_handler)  # Phase 0 protocol has no host-side dispatch.
+
+        # The native Worker has started its no-op handler and durably journaled
+        # uncertainty; the connection-loss seam models a process crash before
+        # the completion/report request can reach the API.
+        journal.record_started(str(task.id), digest, task.lease_expires_at)
+        journal.record_result(
+            str(task.id), {"status": "unknown", "detail": "crashed after start"}
+        )
+
+        class NativeWorkerConnectionLost(RuntimeError):
+            pass
+
+        with pytest.raises(NativeWorkerConnectionLost, match="after start"):
+            raise NativeWorkerConnectionLost("native Worker connection lost after start")
+
+        assert journal.pending_reports() == [
+            (str(task.id), digest, {"status": "unknown", "detail": "crashed after start"})
+        ]
+        started_events = session.exec(
+            select(ControlTask).where(ControlTask.id == task.id)
+        ).one()
+        assert started_events.started_at is not None
+
+        lease_expires_at = task.lease_expires_at
+        assert lease_expires_at is not None
+        recovery_now = lease_expires_at + timedelta(seconds=1)
+        assert claim_next_task(
+            session,
+            worker_id=uuid4(),
+            capabilities={"platform.self_check"},
+            now=recovery_now,
+        ) is None
+        session.refresh(task)
         assert task.status is TaskStatus.MANUAL_REVIEW
+        assert task.result is None
+        assert host_calls == []

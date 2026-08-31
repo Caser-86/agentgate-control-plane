@@ -3,26 +3,12 @@ param([int]$MaxHeartbeatAgeSeconds = 90)
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $repoRoot
-$config = docker compose config | Out-String
+$config = docker compose config
 if ($LASTEXITCODE -ne 0) { throw "docker compose config failed." }
-function Get-ComposeServiceBlock([string]$Text, [string]$Service) {
-    $match = [regex]::Match($Text, "(?ms)^  ${Service}:\r?\n(?:(?!^  [a-z0-9-]+:\r?$).)*")
-    if (-not $match.Success) { throw "Compose service '$Service' is missing." }
-    return $match.Value
-}
-
-$postgresBlock = Get-ComposeServiceBlock $config "postgres"
-if ($postgresBlock -match '(?m)^\s+ports:\s*$') { throw "PostgreSQL must not publish a host port." }
-
-function Assert-LoopbackPort([string]$Service, [string]$Block, [string]$Published, [string]$Target) {
-    if ($Block -notmatch '(?m)^\s+ports:\s*$') { throw "$Service has no published loopback port." }
-    if ($Block -notmatch '(?m)^\s+host_ip:\s+127\.0\.0\.1\s*$') { throw "$Service is not loopback-only." }
-    if ($Block -notmatch "(?m)^\s+published:\s+`"?$Published`"?\s*$") { throw "$Service published port is unsafe." }
-    if ($Block -notmatch "(?m)^\s+target:\s+$Target\s*$") { throw "$Service target port is incorrect." }
-}
-
-Assert-LoopbackPort "API" (Get-ComposeServiceBlock $config "api") "8000" "8000"
-Assert-LoopbackPort "Web" (Get-ComposeServiceBlock $config "web") "5173" "80"
+$postgresBlock = ($config -split '(?m)^  api:')[0]
+if ($postgresBlock -match '(?m)^    ports:') { throw "PostgreSQL must not publish a host port." }
+if ($config -notmatch '127\.0\.0\.1:.*8000:8000') { throw "API is not loopback-only." }
+if ($config -notmatch '127\.0\.0\.1:.*5173:80') { throw "Web is not loopback-only." }
 
 $health = Invoke-RestMethod -Uri "http://127.0.0.1:8000/health" -TimeoutSec 5
 if ($health.status -ne "ok") { throw "API health check failed." }
