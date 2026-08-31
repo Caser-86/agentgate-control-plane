@@ -1,6 +1,8 @@
 from datetime import UTC, datetime, timedelta
 
-from agentgate_worker.client import WorkerClient
+import pytest
+
+from agentgate_worker.client import HttpTransport, WorkerClient
 from agentgate_worker.journal import WorkerJournal
 from agentgate_worker.vault import WorkerCredentials
 
@@ -81,3 +83,51 @@ def test_client_complete_sends_only_self_check_fields(tmp_path: object) -> None:
 
     sent = transport.requests[-1][2]["result"]
     assert sent == {"status": "succeeded", "detail": "read-only"}
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "http://example.com:8000",
+        "http://192.0.2.10:8000",
+        "http://127.0.0.1.evil.example:8000",
+        "ftp://127.0.0.1:8000",
+        "http://[::1:8000",
+        "http://127.0.0.1:not-a-port",
+    ],
+)
+def test_http_transport_rejects_unsafe_api_url_before_request(base_url: str) -> None:
+    with pytest.raises(ValueError, match="loopback"):
+        HttpTransport(base_url)
+
+
+@pytest.mark.parametrize(
+    "base_url", ["http://localhost:8000", "https://127.0.0.1:8443", "http://[::1]:8000"]
+)
+def test_worker_client_accepts_documented_loopback_api_url(
+    base_url: str, tmp_path: object
+) -> None:
+    client = WorkerClient(
+        base_url=base_url,
+        vault=InMemoryVault(),
+        journal=WorkerJournal(tmp_path / "journal.db"),  # type: ignore[operator]
+        worker_name="local-worker",
+        worker_version="0.1.0",
+        capabilities={"platform.self_check"},
+    )
+    assert isinstance(client.transport, HttpTransport)
+
+
+def test_worker_client_rejects_unsafe_api_url_even_with_custom_transport(
+    tmp_path: object,
+) -> None:
+    with pytest.raises(ValueError, match="loopback"):
+        WorkerClient(
+            base_url="http://example.com:8000",
+            vault=InMemoryVault(),
+            journal=WorkerJournal(tmp_path / "journal.db"),  # type: ignore[operator]
+            worker_name="local-worker",
+            worker_version="0.1.0",
+            capabilities={"platform.self_check"},
+            transport=RecordingTransport(),
+        )

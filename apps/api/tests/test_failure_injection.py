@@ -357,7 +357,7 @@ def test_side_effect_uncertain_work_crash_becomes_manual_review(tmp_path) -> Non
         )
         vault.save(WorkerCredentials(str(worker_id), "fake-native-token", PROTOCOL_VERSION))
         client = WorkerClient(
-            base_url="http://fake-native.invalid",
+            base_url="http://127.0.0.1:8000",
             vault=vault,
             journal=journal,
             worker_name="fake-native-crash-worker",

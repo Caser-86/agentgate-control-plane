@@ -1,5 +1,13 @@
 # Task 8 final verification report
 
+## Follow-up Worker boundary fix — 2026-09-01
+
+- Native Worker URL validation now runs in both client construction paths and the main entry point before bearer/enrollment token use; direct tests cover remote DNS/IP, non-HTTP(S), malformed URLs, and IPv6 loopback acceptance.
+- `start-worker.ps1` explicit URL precedence and `verify-foundation.ps1` delegation are covered by API contract tests; remote URL rejection was executed without entering the Worker runtime.
+- Fresh final checks: API `171 passed, 5 skipped`; Worker `19 passed`; frontend `7 files / 14 tests passed`; Ruff/mypy, Compose config, PowerShell parse, and diff check passed.
+
+Limitations: no services were started or stopped; live foundation verification, Docker build, and PostgreSQL runtime tests remain unexecuted (`AGENTGATE_TEST_DATABASE_URL` is unset).
+
 ## Evidence
 
 - Script contract coverage: `10 passed` (`apps/api/tests/test_compose_contract.py`). It proves the three local scripts parse Compose host ports and that foundation verification selects `apps/worker/.venv`, checks `win32crypt`, and never falls back to `apps/api/.venv`.

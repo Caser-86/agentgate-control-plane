@@ -1,5 +1,27 @@
 # Final integration fixes verification report
 
+## Worker loopback boundary and explicit URL fix — 2026-09-01
+
+### Changes
+
+- Added one shared native Worker URL policy used by `HttpTransport` and `WorkerClient` before default or injected transport use. It accepts HTTP(S) `localhost`, IPv4 loopback, and IPv6 loopback; rejects malformed URLs, unsafe schemes/hosts, URL credentials, query/fragment, paths, and invalid ports.
+- Added direct Worker client and main-entry-point regression tests proving unsafe URLs fail before `httpx.request`; updated the in-process failure-injection fixture to use a documented loopback URL.
+- Changed `start-worker.ps1` to parse explicit `-ApiUrl` first and derive/validate its port without consulting `-ApiPort`, environment, or Compose fallback. `verify-foundation.ps1` now invokes that script for the native round trip.
+
+### Fresh evidence
+
+- Worker: `19 passed`; Worker Ruff: `All checks passed!`.
+- Backend: `171 passed, 5 skipped`; API Ruff: `All checks passed!`; mypy: `Success: no issues found in 53 source files`.
+- Frontend: lint/typecheck/build exited `0`; Vitest: `7` files / `14` tests passed.
+- Compose default and alternate-port (`18000`/`15173`) config exited `0`.
+- PowerShell parser checks for `start-worker.ps1` and `verify-foundation.ps1` exited `0`; bounded script execution rejected `http://example.com:8000` before Worker runtime/network use.
+- `git diff --check` exited `0`.
+
+### Limitations
+
+- No Compose service was started or stopped. Live `verify-foundation.ps1`, Docker image build, bounded browser E2E, and PostgreSQL runtime tests are not claimed.
+- PostgreSQL tests remain skipped because `AGENTGATE_TEST_DATABASE_URL` is not configured.
+
 ## Scope
 
 针对最终审查中的 Worker grant 恢复、check submitter 隔离、check proposal 观测原子性，以及 self-check 安全边界完成修复；本轮补齐了原生 Worker 环境与可变 Compose host 端口集成。未执行真实宿主机动作。

@@ -1,6 +1,8 @@
+import ipaddress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Protocol
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -16,6 +18,39 @@ SELF_CHECK_RESULT_KEYS = frozenset(
 
 class WorkerProtocolError(RuntimeError):
     pass
+
+
+def validate_api_url(base_url: str) -> str:
+    """Validate and normalize the Worker API origin before any credential use."""
+    try:
+        parsed = urlsplit(base_url)
+        hostname = parsed.hostname
+        port = parsed.port
+    except (TypeError, ValueError) as error:
+        raise ValueError("Worker API URL must be a valid loopback HTTP(S) URL") from error
+    if (
+        parsed.scheme.lower() not in {"http", "https"}
+        or not parsed.netloc
+        or hostname is None
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or parsed.path not in {"", "/"}
+    ):
+        raise ValueError("Worker API URL must be a valid loopback HTTP(S) URL")
+    normalized_host = hostname.lower().rstrip(".")
+    is_loopback = normalized_host == "localhost"
+    if not is_loopback:
+        try:
+            is_loopback = ipaddress.ip_address(normalized_host).is_loopback
+        except ValueError:
+            is_loopback = False
+    if not is_loopback:
+        raise ValueError("Worker API URL must target a loopback host")
+    if port is not None and not 1 <= port <= 65535:
+        raise ValueError("Worker API URL port must be between 1 and 65535")
+    return base_url.rstrip("/")
 
 
 def sanitize_self_check_result(result: dict[str, object]) -> dict[str, object]:
@@ -42,7 +77,7 @@ class Transport(Protocol):
 
 class HttpTransport:
     def __init__(self, base_url: str) -> None:
-        self.base_url = base_url.rstrip("/")
+        self.base_url = validate_api_url(base_url)
 
     def request(
         self, method: str, path: str, *, headers: dict[str, str], json: dict[str, object]
@@ -94,12 +129,13 @@ class WorkerClient:
     ) -> None:
         if capabilities != {SELF_CHECK_CAPABILITY}:
             raise ValueError("Phase 0 Worker only supports platform.self_check")
+        validated_base_url = validate_api_url(base_url)
         self.vault = vault
         self.journal = journal
         self.worker_name = worker_name
         self.worker_version = worker_version
         self.capabilities = capabilities
-        self.transport = transport or HttpTransport(base_url)
+        self.transport = transport or HttpTransport(validated_base_url)
 
     def register(self, enrollment_token: str) -> WorkerIdentity:
         response = self.transport.request(

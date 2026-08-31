@@ -7,7 +7,29 @@ param(
 )
 
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
-if ([string]::IsNullOrWhiteSpace($ApiUrl) -and $ApiPort -eq 0) {
+$apiUrlSupplied = -not [string]::IsNullOrWhiteSpace($ApiUrl)
+$parsedApiUrl = $null
+if ($apiUrlSupplied) {
+    if (-not [Uri]::TryCreate($ApiUrl, [UriKind]::Absolute, [ref]$parsedApiUrl) -or
+        $parsedApiUrl.Scheme -notin @("http", "https") -or
+        [string]::IsNullOrWhiteSpace($parsedApiUrl.DnsSafeHost) -or
+        $parsedApiUrl.UserInfo -or
+        $parsedApiUrl.Query -or
+        $parsedApiUrl.Fragment -or
+        $parsedApiUrl.AbsolutePath -notin @("", "/")) {
+        throw "API URL must be a valid loopback HTTP(S) URL."
+    }
+    $loopbackHost = $parsedApiUrl.DnsSafeHost.ToLowerInvariant().TrimEnd('.')
+    if ($loopbackHost -notin @("localhost", "127.0.0.1", "::1")) {
+        throw "Remote API targets are not supported; use the local Compose API loopback URL."
+    }
+    try { $urlPort = $parsedApiUrl.Port } catch { throw "API URL must specify a valid port." }
+    if ($urlPort -eq -1) {
+        $urlPort = if ($parsedApiUrl.Scheme -eq "https") { 443 } else { 80 }
+    }
+    $ApiPort = [int]$urlPort
+}
+elseif ($ApiPort -eq 0) {
     if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
         throw "Docker Desktop is required to derive the Compose API loopback port."
     }
@@ -39,13 +61,7 @@ if (-not (Test-Path -LiteralPath $python)) {
 if ($LASTEXITCODE -ne 0) {
     throw "Native Worker dependencies are not installed in apps/worker/.venv; run .\scripts\setup-local.ps1."
 }
-if ([string]::IsNullOrWhiteSpace($ApiUrl)) { $ApiUrl = "http://127.0.0.1:$ApiPort" }
-$parsedApiUrl = $null
-if (-not [Uri]::TryCreate($ApiUrl, [UriKind]::Absolute, [ref]$parsedApiUrl) -or
-    $parsedApiUrl.Scheme -ne "http" -or
-    @("localhost", "127.0.0.1") -notcontains $parsedApiUrl.Host) {
-    throw "Remote API targets are not supported; use the local Compose API loopback URL."
-}
+if (-not $apiUrlSupplied) { $ApiUrl = "http://127.0.0.1:$ApiPort" }
 Push-Location $workerRoot
 try {
     & $python -m agentgate_worker.main --api-url $ApiUrl --state-dir $StateDir --enrollment-token $EnrollmentToken

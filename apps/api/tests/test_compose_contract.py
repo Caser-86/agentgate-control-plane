@@ -114,10 +114,10 @@ def test_local_scripts_run_migrations_before_services_and_use_npm_cmd() -> None:
 
 def test_foundation_verification_starts_worker_before_heartbeat_gate() -> None:
     verify_script = (REPO_ROOT / "scripts/verify-foundation.ps1").read_text(encoding="utf-8")
-    assert verify_script.index("--enrollment-token") < verify_script.index(
+    assert verify_script.index("-EnrollmentToken") < verify_script.index(
         "/api/platform/self-check"
     )
-    assert "state-dir" in verify_script
+    assert "-StateDir" in verify_script
     assert "Remove-Item" in verify_script
 
 
@@ -132,6 +132,20 @@ def test_start_worker_uses_worker_venv_and_configured_loopback_api() -> None:
     assert "remote" in script.lower()
     assert "docker compose config --format json" in script
     assert "import win32crypt" in script
+
+
+def test_start_worker_explicit_api_url_is_parsed_before_port_fallback() -> None:
+    script = (REPO_ROOT / "scripts/start-worker.ps1").read_text(encoding="utf-8")
+    assert "$parsedApiUrl" in script
+    assert script.index("$parsedApiUrl") < script.index("$ApiPort = [int]$apiBindings[0].published")
+    assert "parsedApiUrl.Port" in script
+    assert '@("http", "https")' in script
+
+
+def test_foundation_verification_delegates_worker_start_to_safe_script() -> None:
+    script = (REPO_ROOT / "scripts/verify-foundation.ps1").read_text(encoding="utf-8")
+    assert 'scripts\\start-worker.ps1' in script
+    assert "agentgate_worker.main" not in script
 
 
 def test_built_web_uses_runtime_config_without_stale_port_fallback() -> None:

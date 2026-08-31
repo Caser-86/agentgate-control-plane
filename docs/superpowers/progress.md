@@ -10,6 +10,14 @@
 
 基线目标提交：`70df1d7`（隔离工作树 `codex/reliable-foundation-20260831`）。
 
+## Worker loopback boundary and explicit URL fix — 2026-09-01
+
+- [x] Native `HttpTransport`, `WorkerClient` (including injected transports), and `agentgate_worker.main` now validate API URLs before credentials or network use; only HTTP(S) localhost/IPv4-loopback/IPv6-loopback origins are accepted.
+- [x] `start-worker.ps1 -ApiUrl` is parsed first, derives and validates its URL port, and does not consult `ApiPort`, environment, or Compose fallback when explicit.
+- [x] `verify-foundation.ps1` delegates the native round trip through `start-worker.ps1`, preserving the same validation path.
+- [x] Fresh evidence: API `171 passed, 5 skipped`; Worker `19 passed`; API/Worker Ruff and API mypy passed; frontend lint/typecheck/build passed and Vitest `7 files / 14 tests passed`; default and alternate Compose config, PowerShell parsing, remote-URL early rejection, and `git diff --check` passed.
+- [ ] Live Compose foundation verification, Docker image build, and PostgreSQL runtime tests remain unexecuted; no services were started or stopped, and `AGENTGATE_TEST_DATABASE_URL` is not configured.
+
 已完成：
 
 - 原生 Worker grant 增加 `lease_version`，恢复过期租约时按任务、旧 owner、旧 lease version 原子删除 stale grant；旧 owner/grant 无法启动或完成，新 owner 可重新启动并完成。

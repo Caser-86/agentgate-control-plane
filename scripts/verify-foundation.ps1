@@ -59,10 +59,10 @@ if ($null -eq $check.id) { throw "Foundation self-check did not return a task id
 $workerStateDir = Join-Path ([System.IO.Path]::GetTempPath()) ("agentgate-worker-verify-" + [Guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $workerStateDir -Force | Out-Null
 try {
-    Push-Location $workerRoot
-    try {
-        & $workerPython -m agentgate_worker.main --api-url "http://127.0.0.1:$apiPort" --state-dir $workerStateDir --enrollment-token $WorkerEnrollmentToken
-    } finally { Pop-Location }
+    & (Join-Path $repoRoot "scripts\start-worker.ps1") `
+        -ApiUrl "http://127.0.0.1:$apiPort" `
+        -StateDir $workerStateDir `
+        -EnrollmentToken $WorkerEnrollmentToken
     if ($LASTEXITCODE -ne 0) { throw "Native Worker self-check round trip failed." }
 } finally {
     if (Test-Path -LiteralPath $workerStateDir) {
