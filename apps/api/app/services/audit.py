@@ -24,7 +24,10 @@ SENSITIVE_KEYS = {
 
 
 def is_sensitive_key(key: object) -> bool:
-    return isinstance(key, str) and key.lower().replace("-", "_") in SENSITIVE_KEYS
+    if not isinstance(key, str):
+        return False
+    normalized = "_".join(key.lower().replace("-", "_").split())
+    return normalized in SENSITIVE_KEYS
 
 
 def redact(value: object) -> object:

@@ -17,12 +17,12 @@ async function login(page: import("@playwright/test").Page): Promise<void> {
 
 test("rejects a degraded-service restart and preserves an auditable trace", async ({ page, browser }) => {
   await login(page);
-  await expect(page.getByRole("heading", { name: "Runs", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "运行", exact: true })).toBeVisible();
 
-  await page.getByRole("textbox", { name: "Task request" }).fill(
+  await page.getByTestId("run-request").fill(
     "Investigate payments-api and restore it safely. Do not rotate credentials.",
   );
-  await page.getByRole("button", { name: "Start run", exact: true }).click();
+  await page.getByTestId("start-run").click();
 
   await expect(page).toHaveURL(/\/runs\/[0-9a-f-]+/);
   await expect(page.getByText("Waiting approval", { exact: true }).first()).toBeVisible();
@@ -38,10 +38,11 @@ test("rejects a degraded-service restart and preserves an auditable trace", asyn
   const waitingBody = await page.locator("body").innerText();
   expect(waitingBody).not.toContain("api_key");
 
-  await approval.getByRole("button", { name: "Deny", exact: true }).click();
+  await approval.getByTestId("approval-deny").click();
   await expect(page.getByText("Denied", { exact: true }).first()).toBeVisible({ timeout: 15_000 });
   await page.reload();
   await expect(page.getByText("approval.denied", { exact: true })).toBeVisible();
+  await expect(page.getByText('"denied": true', { exact: true })).toBeVisible();
 
   const runId = page.url().split("/").pop();
   expect(runId).toBeTruthy();
@@ -49,7 +50,7 @@ test("rejects a degraded-service restart and preserves an auditable trace", asyn
   await expect(page.getByRole("heading", { name: "Audit", exact: true })).toBeVisible();
   await page.getByRole("textbox", { name: "Run ID" }).fill(runId ?? "");
   await page.getByRole("button", { name: "Apply filters", exact: true }).click();
-  await expect(page.getByText("approval.approved", { exact: true })).toBeVisible();
+  await expect(page.getByText("approval.denied", { exact: true })).toBeVisible();
 
   const auditBody = await page.locator("body").innerText();
   expect(auditBody).not.toContain("api_key");
@@ -57,7 +58,7 @@ test("rejects a degraded-service restart and preserves an auditable trace", asyn
 
   const mobilePage = await browser.newPage({ viewport: { width: 390, height: 844 } });
   await mobilePage.goto("http://127.0.0.1:5173/");
-  await expect(mobilePage.getByRole("heading", { name: "Runs", exact: true })).toBeVisible();
+  await expect(mobilePage.getByRole("heading", { name: "运行", exact: true })).toBeVisible();
   const dimensions = await mobilePage.evaluate(() => ({
     clientWidth: document.documentElement.clientWidth,
     scrollWidth: document.documentElement.scrollWidth,

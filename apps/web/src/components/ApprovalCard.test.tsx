@@ -35,18 +35,16 @@ describe("ApprovalCard", () => {
     expect(screen.getByText(/explicit human approval/)).toBeInTheDocument();
     expect(screen.getByText("payments-api", { selector: "strong" })).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Approve" }));
-    expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Deny" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "批准" }));
+    expect(screen.getByRole("button", { name: "批准" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "拒绝" })).toBeDisabled();
     await act(async () => { resolveDecision?.(); });
   });
 
   it("explains a duplicate decision and refreshes the detail", async () => {
     const user = userEvent.setup();
     const onRefresh = vi.fn();
-    const onApprove = vi
-      .fn()
-      .mockRejectedValue(new ApiError("approval_conflict", "This action was already decided", 409));
+    const onApprove = vi.fn().mockRejectedValue(new ApiError("approval_conflict", "already decided", 409));
 
     render(
       <ApprovalCard
@@ -56,9 +54,25 @@ describe("ApprovalCard", () => {
         onRefresh={onRefresh}
       />,
     );
-    await user.click(screen.getByRole("button", { name: "Approve" }));
+    await user.click(screen.getByRole("button", { name: "批准" }));
 
-    expect(await screen.findByText("This action was already decided")).toBeInTheDocument();
+    expect(await screen.findByText("该操作已完成决定")).toBeInTheDocument();
     expect(onRefresh).toHaveBeenCalledOnce();
+  });
+
+  it("does not render an exception message that contains secret-like values", async () => {
+    const user = userEvent.setup();
+    render(
+      <ApprovalCard
+        action={{ ...action, arguments: { "api-key": "fake-secret" } }}
+        onApprove={vi.fn().mockRejectedValue(new Error("api-key=fake-secret"))}
+        onDeny={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "批准" }));
+
+    expect(await screen.findByText("无法保存审批决定")).toBeInTheDocument();
+    expect(screen.queryByText("fake-secret")).not.toBeInTheDocument();
   });
 });

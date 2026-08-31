@@ -34,9 +34,9 @@ describe("RunsPage", () => {
         <RunsPage />
       </MemoryRouter>,
     );
-    const input = screen.getByRole("textbox", { name: "Task request" });
+    const input = screen.getByTestId("run-request");
     fireEvent.change(input, { target: { value: "Inspect payments-api" } });
-    fireEvent.click(screen.getByRole("button", { name: "Start run" }));
+    fireEvent.click(screen.getByTestId("start-run"));
 
     await waitFor(() => expect(api.createRun).toHaveBeenCalledWith({ user_request: "Inspect payments-api" }));
     expect(await screen.findByRole("link", { name: /run-new/ })).toBeInTheDocument();
