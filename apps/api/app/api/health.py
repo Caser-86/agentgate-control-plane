@@ -1,8 +1,13 @@
-from fastapi import APIRouter
+from typing import Annotated
 
+from fastapi import APIRouter, Depends
+
+from app.auth.dependencies import require_operator
+from app.auth.models import Operator
 from app.config import get_settings
 
 router = APIRouter()
+OperatorDep = Annotated[Operator, Depends(require_operator)]
 
 
 @router.get("/health")
@@ -11,7 +16,7 @@ def health() -> dict[str, str]:
 
 
 @router.get("/api/meta")
-def meta() -> dict[str, str]:
+def meta(_: OperatorDep) -> dict[str, str]:
     settings = get_settings()
     return {
         "provider": settings.llm_provider,

@@ -1,20 +1,18 @@
-from collections.abc import Generator
 from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session
 
-from app.db import create_db_and_tables, create_db_engine, get_session, seed_demo_state
-from app.main import app
+from app.db import seed_demo_state
 from app.repositories import AuditRepository, RunRepository
 from app.services.audit import AuditService
+from tests.conftest import authenticate_client
 
 
 @pytest.fixture
-def api_client() -> Generator[tuple[TestClient, UUID], None, None]:
-    engine = create_db_engine("sqlite://")
-    create_db_and_tables(engine)
+def api_client(auth_client: tuple[TestClient, object, object]) -> tuple[TestClient, UUID]:
+    client, engine, token_file = auth_client
     with Session(engine) as session:
         seed_demo_state(session)
         run = RunRepository(session).create("Inspect payments-api", "mock", "mock")
@@ -23,14 +21,8 @@ def api_client() -> Generator[tuple[TestClient, UUID], None, None]:
             run.id, "run.created", "user", {"user_request": "Inspect payments-api"}
         )
 
-    def override_session():
-        with Session(engine) as session:
-            yield session
-
-    app.dependency_overrides[get_session] = override_session
-    with TestClient(app) as client:
-        yield client, run_id
-    app.dependency_overrides.clear()
+    authenticate_client(client, token_file)
+    return client, run_id
 
 
 def test_audit_list_and_export(api_client: tuple[TestClient, UUID]) -> None:

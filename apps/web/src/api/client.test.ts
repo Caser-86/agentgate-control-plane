@@ -16,7 +16,7 @@ describe("api client", () => {
     );
 
     await expect(api.getRun("missing")).rejects.toEqual(
-      expect.objectContaining({ code: "not_found", message: "run was not found", status: 404 }),
+      expect.objectContaining({ code: "not_found", message: "Request failed", status: 404 }),
     );
   });
 });

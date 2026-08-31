@@ -6,10 +6,10 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session
 
-from app.db import create_db_and_tables, get_engine, seed_demo_state
-from app.main import app
+from app.db import seed_demo_state
 from app.repositories import RunRepository
 from app.services.events import EventBroker
+from tests.conftest import authenticate_client
 
 
 @pytest.mark.asyncio
@@ -91,9 +91,10 @@ def test_sse_frame_shape() -> None:
     assert f"data: {json.dumps({'status': 'running'})}\n\n" in frame
 
 
-def test_http_sse_stream_emits_event_frame(monkeypatch) -> None:
-    engine = get_engine()
-    create_db_and_tables(engine)
+def test_http_sse_stream_emits_event_frame(
+    monkeypatch: pytest.MonkeyPatch, auth_client: tuple[TestClient, object, object]
+) -> None:
+    client, engine, token_file = auth_client
     with Session(engine) as session:
         seed_demo_state(session)
         run = RunRepository(session).create("Inspect payments-api", "mock", "mock")
@@ -106,7 +107,8 @@ def test_http_sse_stream_emits_event_frame(monkeypatch) -> None:
     from app.api import runs as runs_api
 
     monkeypatch.setattr(runs_api, "stream_events", finite_stream)
-    response = TestClient(app).get(f"/api/runs/{run_id}/events")
+    authenticate_client(client, token_file)
+    response = client.get(f"/api/runs/{run_id}/events")
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")

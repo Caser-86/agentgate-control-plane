@@ -8,6 +8,7 @@ from sqlmodel import SQLModel
 # Import every SQLModel module before accessing metadata. Task 2 extends this list.
 import app.models  # noqa: F401
 import app.control.models  # noqa: F401
+import app.auth.models  # noqa: F401
 
 config = context.config
 

@@ -13,6 +13,12 @@ import type {
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 export const apiBaseUrl = API_BASE_URL;
 
+let csrfToken: string | null = null;
+
+export function setCsrfToken(token: string | null): void {
+  csrfToken = token;
+}
+
 export class ApiError extends Error {
   readonly code: string;
   readonly status: number;
@@ -26,17 +32,32 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = new Headers(init?.headers);
+  if (init?.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+  const method = (init?.method ?? "GET").toUpperCase();
+  if (!["GET", "HEAD", "OPTIONS"].includes(method) && csrfToken) {
+    headers.set("X-CSRF-Token", csrfToken);
+  }
   const response = await fetch(`${API_BASE_URL}${path}`, {
-    headers: { "Content-Type": "application/json", ...init?.headers },
     ...init,
+    credentials: "include",
+    headers,
   });
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as {
       error?: { code?: string; message?: string };
     } | null;
+    const code = response.status === 401
+      ? "authentication_required"
+      : response.status === 422
+        ? "validation_error"
+        : body?.error?.code ?? "http_error";
+    if (response.status === 401 && typeof window !== "undefined") {
+      window.dispatchEvent(new Event("agentgate:session-expired"));
+    }
     throw new ApiError(
-      body?.error?.code ?? "http_error",
-      body?.error?.message ?? "Request failed",
+      code,
+      "Request failed",
       response.status,
     );
   }
@@ -53,6 +74,21 @@ function queryString(filters: AuditFilters): string {
 }
 
 export const api = {
+  authStatus(): Promise<{ authenticated: boolean; setup_required: boolean }> {
+    return request("/api/auth/status");
+  },
+  csrf(): Promise<{ csrf_token: string }> {
+    return request("/api/auth/csrf");
+  },
+  setup(input: { bootstrap_token: string; password: string }): Promise<{ authenticated: boolean }> {
+    return request("/api/auth/setup", { method: "POST", body: JSON.stringify(input) });
+  },
+  login(input: { password: string }): Promise<{ authenticated: boolean }> {
+    return request("/api/auth/login", { method: "POST", body: JSON.stringify(input) });
+  },
+  logout(): Promise<void> {
+    return request("/api/auth/logout", { method: "POST" });
+  },
   createRun(input: CreateRunRequest): Promise<AgentRun> {
     return request<AgentRun>("/api/runs", {
       method: "POST",

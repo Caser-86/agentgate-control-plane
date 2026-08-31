@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     worker_lease_seconds: int = 30
     outbox_batch_size: int = 100
     auth_bootstrap_token_file: str = "/app/data/bootstrap-token"
+    auth_bootstrap_ttl_seconds: int = 900
+    auth_session_ttl_seconds: int = 28800
+    auth_cookie_secure: bool = False
     environment: str = Field(default="production", validation_alias="AGENTGATE_ENV")
     seed_demo: bool = Field(default=False, validation_alias="AGENTGATE_SEED_DEMO")
     max_steps: int = 8

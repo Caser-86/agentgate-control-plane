@@ -9,9 +9,12 @@ from sqlmodel import Session
 
 from app.api.approvals import router as approvals_router
 from app.api.audit import router as audit_router
+from app.api.auth import router as auth_router
 from app.api.health import router as health_router
 from app.api.policies import router as policies_router
 from app.api.runs import router as runs_router
+from app.api.v1 import router as v1_router
+from app.auth.security import ensure_bootstrap_token
 from app.config import get_settings
 from app.db import database_schema_is_ready, get_engine, seed_demo_state
 
@@ -28,6 +31,9 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     if settings.environment == "development" and settings.seed_demo:
         with Session(engine) as session:
             seed_demo_state(session)
+    if not is_sqlite_test_engine:
+        with Session(engine) as session:
+            ensure_bootstrap_token(session, settings)
     yield
 
 
@@ -36,14 +42,16 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[settings.web_origin],
     allow_credentials=True,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
     allow_headers=["*"],
 )
 app.include_router(health_router)
+app.include_router(auth_router)
 app.include_router(runs_router)
 app.include_router(approvals_router)
 app.include_router(audit_router)
 app.include_router(policies_router)
+app.include_router(v1_router)
 
 
 @app.exception_handler(HTTPException)

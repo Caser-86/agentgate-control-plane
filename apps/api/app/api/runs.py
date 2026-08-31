@@ -8,6 +8,8 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlmodel import Session
 
+from app.auth.dependencies import require_csrf, require_operator
+from app.auth.models import Operator
 from app.config import get_settings
 from app.db import get_session
 from app.models import AgentRun, AuditEvent, ToolAction
@@ -25,6 +27,8 @@ from app.services.runs import RunService
 
 router = APIRouter(prefix="/api/runs", tags=["runs"])
 SessionDep = Annotated[Session, Depends(get_session)]
+OperatorDep = Annotated[Operator, Depends(require_operator)]
+CsrfOperatorDep = Annotated[Operator, Depends(require_csrf)]
 
 
 def _parse_json(value: str | None) -> object | None:
@@ -93,6 +97,7 @@ def create_run(
     request: CreateRunRequest,
     background_tasks: BackgroundTasks,
     session: SessionDep,
+    _: CsrfOperatorDep,
 ) -> AgentRunResponse:
     try:
         run = RunService(session, get_settings()).create(request.user_request, background_tasks)
@@ -105,12 +110,12 @@ def create_run(
 
 
 @router.get("", response_model=list[AgentRunResponse])
-def list_runs(session: SessionDep) -> list[AgentRunResponse]:
+def list_runs(session: SessionDep, _: OperatorDep) -> list[AgentRunResponse]:
     return [to_run_response(run) for run in RunRepository(session).list()]
 
 
 @router.get("/{run_id}", response_model=RunDetailResponse)
-def get_run(run_id: UUID, session: SessionDep) -> RunDetailResponse:
+def get_run(run_id: UUID, session: SessionDep, _: OperatorDep) -> RunDetailResponse:
     run = RunRepository(session).get(run_id)
     if run is None:
         raise HTTPException(
@@ -157,9 +162,7 @@ async def stream_events(
 
 
 @router.get("/{run_id}/events")
-async def run_events(
-    run_id: UUID, session: SessionDep
-) -> StreamingResponse:
+async def run_events(run_id: UUID, session: SessionDep, _: OperatorDep) -> StreamingResponse:
     if RunRepository(session).get(run_id) is None:
         raise HTTPException(
             status_code=404,

@@ -6,17 +6,21 @@ from fastapi.responses import JSONResponse
 from sqlmodel import Session
 
 from app.api.runs import to_audit_response
+from app.auth.dependencies import require_operator
+from app.auth.models import Operator
 from app.db import get_session
 from app.repositories import AuditRepository
 from app.schemas import AuditEventResponse
 
 router = APIRouter(prefix="/api/audit", tags=["audit"])
 SessionDep = Annotated[Session, Depends(get_session)]
+OperatorDep = Annotated[Operator, Depends(require_operator)]
 
 
 @router.get("", response_model=list[AuditEventResponse])
 def list_audit(
     session: SessionDep,
+    _: OperatorDep,
     run_id: UUID | None = None,
     event_type: str | None = None,
     actor: str | None = None,
@@ -30,6 +34,7 @@ def list_audit(
 @router.get("/export")
 def export_audit(
     session: SessionDep,
+    _: OperatorDep,
     run_id: UUID | None = None,
     event_type: str | None = None,
     actor: str | None = None,

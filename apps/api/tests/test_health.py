@@ -5,6 +5,7 @@ import app.main as main
 from app.config import Settings, get_settings
 from app.db import create_db_and_tables, create_db_engine
 from app.models import ServiceState
+from tests.conftest import authenticate_client
 
 app = main.app
 
@@ -16,8 +17,12 @@ def test_health_returns_service_status() -> None:
     assert response.json() == {"status": "ok", "service": "agentgate-api"}
 
 
-def test_meta_returns_provider_without_secret_material() -> None:
-    response = TestClient(app).get("/api/meta")
+def test_meta_returns_provider_without_secret_material(
+    auth_client: tuple[TestClient, object, object]
+) -> None:
+    client, _, token_file = auth_client
+    authenticate_client(client, token_file)
+    response = client.get("/api/meta")
 
     assert response.status_code == 200
     assert response.json() == {

@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class CreateRunRequest(BaseModel):
@@ -9,8 +9,71 @@ class CreateRunRequest(BaseModel):
 
 
 class ApprovalRequest(BaseModel):
-    actor: str = Field(default="local-user", min_length=1, max_length=80)
+    model_config = ConfigDict(extra="forbid")
+
     note: str | None = Field(default=None, max_length=500)
+
+
+class AuthStatusResponse(BaseModel):
+    authenticated: bool
+    setup_required: bool
+
+
+class SetupRequest(BaseModel):
+    bootstrap_token: str = Field(min_length=1, max_length=500)
+    password: str = Field(min_length=12, max_length=512)
+
+
+class LoginRequest(BaseModel):
+    password: str = Field(min_length=1, max_length=512)
+
+
+class CsrfResponse(BaseModel):
+    csrf_token: str
+
+
+class CreateClientTokenRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    scopes: set[str] = Field(min_length=1)
+    expires_in_seconds: int | None = Field(default=None, ge=60, le=31_536_000)
+    rotate_token_id: UUID | None = None
+
+
+class ClientTokenCreatedResponse(BaseModel):
+    id: UUID
+    name: str
+    scopes: list[str]
+    expires_at: datetime | None
+    token: str
+
+
+class EventProposalRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    event_type: str = Field(min_length=1, max_length=120)
+    payload: dict[str, object] = Field(default_factory=dict)
+
+
+class CheckProposalRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    check_type: str = Field(min_length=1, max_length=120)
+    target: str = Field(min_length=1, max_length=120)
+    parameters: dict[str, object] = Field(default_factory=dict)
+    idempotency_key: str = Field(min_length=1, max_length=160)
+
+
+class ActionProposalRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    action_type: str = Field(min_length=1, max_length=120)
+    target: str = Field(min_length=1, max_length=120)
+    parameters: dict[str, object] = Field(default_factory=dict)
+
+
+class ProposalResponse(BaseModel):
+    id: UUID | None = None
+    decision: str | None = None
 
 
 class AgentRunResponse(BaseModel):

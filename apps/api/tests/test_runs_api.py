@@ -1,5 +1,4 @@
 import json
-from collections.abc import Generator
 from uuid import uuid4
 
 import pytest
@@ -7,26 +6,18 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session
 
 from app.api.runs import to_action_response
-from app.db import create_db_and_tables, create_db_engine, get_session, seed_demo_state
-from app.main import app
+from app.db import seed_demo_state
 from app.models import ActionStatus, PolicyDecision, RiskLevel, ToolAction
+from tests.conftest import authenticate_client
 
 
 @pytest.fixture
-def api_client() -> Generator[TestClient, None, None]:
-    engine = create_db_engine("sqlite://")
-    create_db_and_tables(engine)
+def api_client(auth_client: tuple[TestClient, object, object]) -> TestClient:
+    client, engine, token_file = auth_client
     with Session(engine) as session:
         seed_demo_state(session)
-
-    def override_session():
-        with Session(engine) as session:
-            yield session
-
-    app.dependency_overrides[get_session] = override_session
-    with TestClient(app) as client:
-        yield client
-    app.dependency_overrides.clear()
+    authenticate_client(client, token_file)
+    return client
 
 
 def test_runs_api_contract(api_client: TestClient) -> None:
@@ -63,7 +54,7 @@ def test_pending_approval_can_be_approved_and_duplicate_conflicts(api_client: Te
 
     approved = api_client.post(
         f"/api/approvals/{action['id']}/approve",
-        json={"actor": "local-user", "note": "Reviewed the impact."},
+        json={"note": "Reviewed the impact."},
     )
     duplicate = api_client.post(f"/api/approvals/{action['id']}/approve", json={})
 
