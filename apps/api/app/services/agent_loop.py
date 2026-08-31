@@ -7,6 +7,7 @@ from uuid import UUID
 from pydantic import ValidationError
 from sqlmodel import Session
 
+from app.control.repositories import append_outbox_event
 from app.llm.base import LLMProvider, ToolCall
 from app.models import (
     ActionStatus,
@@ -18,7 +19,6 @@ from app.models import (
 from app.policy import PolicyEngine
 from app.repositories import ActionRepository, AuditRepository, RunRepository
 from app.services.audit import AuditService
-from app.services.events import EventBroker, event_broker
 from app.services.executor import ToolExecutor
 from app.tools.registry import ToolRegistry, UnknownToolError
 
@@ -34,7 +34,6 @@ class AgentRunner:
         registry: ToolRegistry | None = None,
         max_steps: int = 8,
         run_timeout_seconds: float = 120,
-        events: EventBroker | None = None,
     ) -> None:
         self.session = session
         self.provider = provider
@@ -52,13 +51,25 @@ class AgentRunner:
         )
         self.max_steps = max_steps
         self.run_timeout_seconds = run_timeout_seconds
-        self.events = events or event_broker
+
+    def _emit(self, run_id: UUID, event_type: str, payload: dict[str, object]) -> None:
+        append_outbox_event(
+            self.session,
+            event_type=event_type,
+            resource_type="run",
+            resource_id=run_id,
+            payload=payload,
+        )
 
     def create_run(self, user_request: str) -> AgentRun:
-        run = self.run_repository.create(user_request, self.provider_name, self.model)
+        run = self.run_repository.create(user_request, self.provider_name, self.model, commit=False)
         messages: list[dict[str, object]] = [{"role": "user", "content": user_request}]
-        self.run_repository.save_checkpoint(run.id, messages, 0)
-        self.audit.append(run.id, "run.created", "user", {"user_request": user_request})
+        self.run_repository.save_checkpoint(run.id, messages, 0, commit=False)
+        self.audit.append(
+            run.id, "run.created", "user", {"user_request": user_request}, commit=False
+        )
+        self.session.commit()
+        self.session.refresh(run)
         return self.run_repository.get(run.id) or run
 
     async def start_run(self, user_request: str) -> UUID:
@@ -82,10 +93,15 @@ class AgentRunner:
         if run.status in {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED}:
             return
         if run.status in {RunStatus.QUEUED, RunStatus.WAITING_APPROVAL}:
-            self.run_repository.set_status(
-                run_id, {RunStatus.QUEUED, RunStatus.WAITING_APPROVAL}, RunStatus.RUNNING
+            changed = self.run_repository.set_status(
+                run_id,
+                {RunStatus.QUEUED, RunStatus.WAITING_APPROVAL},
+                RunStatus.RUNNING,
+                commit=False,
             )
-            await self.events.publish(run_id, "run.updated", {"status": RunStatus.RUNNING.value})
+            if changed:
+                self._emit(run_id, "run.updated", {"status": RunStatus.RUNNING.value})
+                self.session.commit()
         messages = run.messages()
 
         while True:
@@ -102,16 +118,18 @@ class AgentRunner:
             self.run_repository.save_checkpoint(run_id, messages, step_count)
 
             if not turn.tool_calls:
-                self.run_repository.set_status(run_id, {RunStatus.RUNNING}, RunStatus.COMPLETED)
-                await self.events.publish(
-                    run_id, "run.updated", {"status": RunStatus.COMPLETED.value}
+                self.run_repository.set_status(
+                    run_id, {RunStatus.RUNNING}, RunStatus.COMPLETED, commit=False
                 )
+                self._emit(run_id, "run.updated", {"status": RunStatus.COMPLETED.value})
                 self.audit.append(
                     run_id,
                     "run.completed",
                     "agent",
                     {"final_text": turn.text or ""},
+                    commit=False,
                 )
+                self.session.commit()
                 return
 
             for call in turn.tool_calls:
@@ -152,7 +170,13 @@ class AgentRunner:
             )
             result = {"error": "unknown tool denied", "tool": call.name}
             self._save_result(action, result)
-            self.audit.append(run_id, "tool.denied", "policy", result, action.id)
+            self._emit(
+                run_id,
+                "action.updated",
+                {"action_id": str(action.id), "status": action.status.value},
+            )
+            self.audit.append(run_id, "tool.denied", "policy", result, action.id, commit=False)
+            self.session.commit()
             return json.dumps(result), False
 
         try:
@@ -170,7 +194,13 @@ class AgentRunner:
             )
             result = {"error": "tool arguments failed schema validation"}
             self._save_result(action, result)
-            self.audit.append(run_id, "tool.denied", "policy", result, action.id)
+            self._emit(
+                run_id,
+                "action.updated",
+                {"action_id": str(action.id), "status": action.status.value},
+            )
+            self.audit.append(run_id, "tool.denied", "policy", result, action.id, commit=False)
+            self.session.commit()
             return json.dumps(result), False
 
         policy_result = self.policy.evaluate(registered.spec, call.arguments)
@@ -189,7 +219,18 @@ class AgentRunner:
             status=action_status,
             reason=policy_result.reason,
         )
-        await self.events.publish(
+        if policy_result.decision is PolicyDecision.DENY:
+            result = {"error": "action denied", "reason": policy_result.reason}
+            self._save_result(action, result)
+            self._emit(
+                run_id,
+                "action.updated",
+                {"action_id": str(action.id), "status": action.status.value},
+            )
+            self.audit.append(run_id, "tool.denied", "policy", result, action.id, commit=False)
+            self.session.commit()
+            return json.dumps(result), False
+        self._emit(
             run_id,
             "action.updated",
             {"action_id": str(action.id), "status": action.status.value},
@@ -208,8 +249,10 @@ class AgentRunner:
         )
 
         if policy_result.decision is PolicyDecision.REQUIRE_APPROVAL:
-            self.run_repository.set_status(run_id, {RunStatus.RUNNING}, RunStatus.WAITING_APPROVAL)
-            await self.events.publish(
+            self.run_repository.set_status(
+                run_id, {RunStatus.RUNNING}, RunStatus.WAITING_APPROVAL, commit=False
+            )
+            self._emit(
                 run_id,
                 "run.updated",
                 {"status": RunStatus.WAITING_APPROVAL.value, "action_id": str(action.id)},
@@ -220,20 +263,18 @@ class AgentRunner:
                 "system",
                 {"action_id": str(action.id), "step_count": step_count},
                 action.id,
+                commit=False,
             )
+            self.session.commit()
             return None, True
-        if policy_result.decision is PolicyDecision.DENY:
-            result = {"error": "action denied", "reason": policy_result.reason}
-            self._save_result(action, result)
-            self.audit.append(run_id, "tool.denied", "policy", result, action.id)
-            return json.dumps(result), False
-
+        self.session.commit()
         executed = await self.executor.execute(action.id)
-        await self.events.publish(
+        self._emit(
             run_id,
             "action.updated",
             {"action_id": str(action.id), "status": executed.status.value},
         )
+        self.session.commit()
         return executed.result_json or json.dumps({"error": "tool returned no result"}), False
 
     def _create_action(
@@ -262,14 +303,13 @@ class AgentRunner:
             idempotency_key=f"{run_id}:{tool_call_id}",
             decided_at=datetime.now(UTC),
         )
-        return self.action_repository.create(action)
+        return self.action_repository.create(action, commit=False)
 
     def _save_result(self, action: ToolAction, result: Mapping[str, object]) -> None:
         action.result_json = json.dumps(result, ensure_ascii=False)
         action.executed_at = datetime.now(UTC)
         self.session.add(action)
-        self.session.commit()
-        self.session.refresh(action)
+        self.session.flush()
 
     def _fail_run(self, run_id: UUID, message: str) -> None:
         run = self.run_repository.get(run_id)
@@ -279,5 +319,6 @@ class AgentRunner:
         run.error_message = message
         run.updated_at = datetime.now(UTC)
         self.session.add(run)
+        self.audit.append(run_id, "run.failed", "system", {"error": message}, commit=False)
+        self._emit(run_id, "run.updated", {"status": RunStatus.FAILED.value})
         self.session.commit()
-        self.audit.append(run_id, "run.failed", "system", {"error": message})

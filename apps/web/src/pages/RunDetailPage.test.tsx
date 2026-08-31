@@ -2,10 +2,13 @@ import { render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import { api } from "../api/client";
+import { parseRunEvent } from "../hooks/useRunEvents";
 import { RunDetailPage } from "./RunDetailPage";
 
 vi.mock("../api/client", () => ({
   apiBaseUrl: "http://localhost:8000",
+  eventStreamUrl: (runId: string, after: number) =>
+    `http://localhost:8000/api/runs/${runId}/events?after=${after}`,
   api: {
     getRun: vi.fn(),
     approveAction: vi.fn(),
@@ -14,6 +17,18 @@ vi.mock("../api/client", () => ({
 }));
 
 describe("RunDetailPage", () => {
+  it("ignores stale and malformed SSE frames before they can replace REST state", () => {
+    expect(
+      parseRunEvent({ lastEventId: "11", type: "run.updated", data: '{"status":"completed"}' } as MessageEvent<string>, 10),
+    ).toEqual({ id: 11, event_type: "run.updated", payload: { status: "completed" } });
+    expect(
+      parseRunEvent({ lastEventId: "10", type: "run.updated", data: '{"status":"running"}' } as MessageEvent<string>, 10),
+    ).toBeNull();
+    expect(
+      parseRunEvent({ lastEventId: "12", type: "run.updated", data: "not-json" } as MessageEvent<string>, 10),
+    ).toBeNull();
+  });
+
   it("renders the timeline and never exposes a raw API key", async () => {
     vi.mocked(api.getRun).mockResolvedValue({
       id: "run-1",

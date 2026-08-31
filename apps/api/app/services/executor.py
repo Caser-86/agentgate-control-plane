@@ -7,6 +7,7 @@ from uuid import UUID
 from pydantic import ValidationError
 from sqlmodel import Session
 
+from app.control.repositories import append_outbox_event
 from app.models import ActionStatus, ToolAction
 from app.repositories import ActionRepository, AuditRepository
 from app.services.audit import AuditService
@@ -40,6 +41,15 @@ class ToolExecutor:
         self.audit = AuditService(audit or AuditRepository(session))
         self.timeout_seconds = timeout_seconds
 
+    def _emit(self, action: ToolAction) -> None:
+        append_outbox_event(
+            self.session,
+            event_type="action.updated",
+            resource_type="action",
+            resource_id=action.id,
+            payload={"action_id": str(action.id), "status": action.status.value},
+        )
+
     async def execute(self, action_id: UUID) -> ToolAction:
         action = self.action_repository.get(action_id)
         if action is None:
@@ -53,6 +63,7 @@ class ToolExecutor:
             action_id,
             {ActionStatus.AUTO_APPROVED, ActionStatus.APPROVED},
             ActionStatus.RUNNING,
+            commit=False,
         )
         if not claimed:
             latest = self.action_repository.get(action_id)
@@ -63,7 +74,9 @@ class ToolExecutor:
         action = self.action_repository.get(action_id)
         if action is None:
             raise ActionNotFoundError("tool action disappeared during execution")
-        await self._audit_started(action)
+        self._emit(action)
+        await self._audit_started(action, commit=False)
+        self.session.commit()
 
         try:
             registered = self.registry.get(action.tool_name)
@@ -92,24 +105,27 @@ class ToolExecutor:
         action.result_json = json.dumps(result, ensure_ascii=False, default=str)
         action.executed_at = datetime.now(UTC)
         self.session.add(action)
-        self.session.commit()
-        self.session.refresh(action)
+        self._emit(action)
         self.audit.append(
             action.run_id,
             "tool.succeeded",
             "tool",
             {"tool_name": action.tool_name, "result": result},
             action.id,
+            commit=False,
         )
+        self.session.commit()
+        self.session.refresh(action)
         return action
 
-    async def _audit_started(self, action: ToolAction) -> None:
+    async def _audit_started(self, action: ToolAction, *, commit: bool = True) -> None:
         self.audit.append(
             action.run_id,
             "tool.started",
             "tool",
             {"tool_name": action.tool_name},
             action.id,
+            commit=commit,
         )
 
     async def _fail(self, action_id: UUID, message: str) -> ToolAction:
@@ -120,13 +136,15 @@ class ToolExecutor:
         action.result_json = json.dumps({"error": message}, ensure_ascii=False)
         action.executed_at = datetime.now(UTC)
         self.session.add(action)
-        self.session.commit()
-        self.session.refresh(action)
+        self._emit(action)
         self.audit.append(
             action.run_id,
             "tool.failed",
             "tool",
             {"tool_name": action.tool_name, "error": message},
             action.id,
+            commit=False,
         )
+        self.session.commit()
+        self.session.refresh(action)
         return action

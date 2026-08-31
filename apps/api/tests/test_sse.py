@@ -1,97 +1,99 @@
-import asyncio
-import json
+from collections.abc import AsyncIterator
 from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session
 
+from app.control.repositories import append_outbox_event
 from app.db import seed_demo_state
 from app.repositories import RunRepository
-from app.services.events import EventBroker
 from tests.conftest import authenticate_client
 
 
-@pytest.mark.asyncio
-async def test_subscriber_receives_events_for_its_run_only() -> None:
-    broker = EventBroker(queue_size=2)
-    first_run = uuid4()
-    second_run = uuid4()
-    stream = broker.subscribe(first_run)
-    task = asyncio.create_task(stream.__anext__())
-    await asyncio.sleep(0)
-
-    await broker.publish(second_run, "run.updated", {"status": "running"})
-    await broker.publish(first_run, "run.updated", {"status": "waiting_approval"})
-    event = await asyncio.wait_for(task, timeout=1)
-
-    assert event.run_id == first_run
-    assert event.event_type == "run.updated"
-    await stream.aclose()
+async def _take(stream: AsyncIterator[str], count: int) -> list[str]:
+    frames: list[str] = []
+    try:
+        for _ in range(count):
+            frames.append(await anext(stream))
+    finally:
+        await stream.aclose()
+    return frames
 
 
 @pytest.mark.asyncio
-async def test_slow_subscriber_does_not_block_publish() -> None:
-    broker = EventBroker(queue_size=1)
+async def test_run_stream_reconnects_after_last_event_id() -> None:
+    from app.db import create_db_and_tables, create_db_engine
+    from app.services.outbox import stream_outbox_events
+
+    engine = create_db_engine("sqlite://")
+    create_db_and_tables(engine)
     run_id = uuid4()
-    stream = broker.subscribe(run_id)
-    task = asyncio.create_task(stream.__anext__())
-    await asyncio.sleep(0)
+    with Session(engine) as session:
+        for status in ("queued", "running", "completed"):
+            append_outbox_event(
+                session,
+                event_type="run.updated",
+                resource_type="run",
+                resource_id=run_id,
+                payload={"status": status},
+            )
+        session.commit()
 
-    await asyncio.wait_for(
-        broker.publish(run_id, "run.updated", {"status": "one"}), timeout=1
+    frames = await _take(
+        stream_outbox_events(
+            lambda: Session(engine), cursor=2, resource_id=run_id, poll_interval=0.01
+        ),
+        1,
     )
-    await asyncio.wait_for(
-        broker.publish(run_id, "run.updated", {"status": "two"}), timeout=1
-    )
-    task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await task
-    await stream.aclose()
+
+    assert frames == ['id: 3\nevent: run.updated\ndata: {"status": "completed"}\n\n']
 
 
 @pytest.mark.asyncio
-async def test_unsubscribe_removes_queue() -> None:
-    broker = EventBroker()
-    run_id = uuid4()
-    stream = broker.subscribe(run_id)
-    task = asyncio.create_task(stream.__anext__())
-    await asyncio.sleep(0)
-    assert broker.subscriber_count(run_id) == 1
-    task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await task
+async def test_idle_stream_emits_a_heartbeat_and_can_be_cancelled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.db import create_db_and_tables, create_db_engine
+    from app.services import outbox as outbox_service
+    from app.services.outbox import stream_outbox_events
+
+    monkeypatch.setattr(outbox_service, "HEARTBEAT_SECONDS", 0.01)
+    engine = create_db_engine("sqlite://")
+    create_db_and_tables(engine)
+    stream = stream_outbox_events(lambda: Session(engine), cursor=0, resource_id=uuid4())
+
+    assert await anext(stream) == ": heartbeat\n\n"
     await stream.aclose()
-    assert broker.subscriber_count(run_id) == 0
 
 
-@pytest.mark.asyncio
-async def test_http_stream_cleans_up_when_client_disconnects() -> None:
-    from app.api.runs import stream_events
+def test_sse_cursor_prefers_the_smaller_valid_last_event_id_and_after() -> None:
+    from app.services.outbox import effective_cursor
 
-    broker = EventBroker()
-    run_id = uuid4()
-    stream = stream_events(run_id, broker)
-    task = asyncio.create_task(stream.__anext__())
-    await asyncio.sleep(0)
-
-    task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await task
-    assert broker.subscriber_count(run_id) == 0
+    assert effective_cursor(last_event_id="7", after="3") == 3
+    assert effective_cursor(last_event_id="7", after="invalid") == 7
+    assert effective_cursor(last_event_id="invalid", after="3") == 3
+    assert effective_cursor(last_event_id="-1", after=None) == 0
 
 
-def test_sse_frame_shape() -> None:
-    from app.api.runs import format_sse
+def test_missing_run_stream_returns_404_without_opening_a_stream(
+    monkeypatch: pytest.MonkeyPatch, auth_client: tuple[TestClient, object, object]
+) -> None:
+    client, _, token_file = auth_client
+    from app.api import runs as runs_api
 
-    frame = format_sse(7, "run.updated", {"status": "running"})
+    def stream_was_not_opened(*_: object, **__: object) -> AsyncIterator[str]:
+        raise AssertionError("missing run must not open an event stream")
 
-    assert "id: 7\n" in frame
-    assert "event: run.updated\n" in frame
-    assert f"data: {json.dumps({'status': 'running'})}\n\n" in frame
+    monkeypatch.setattr(runs_api, "stream_run_events", stream_was_not_opened)
+    authenticate_client(client, token_file)
+
+    response = client.get(f"/api/runs/{uuid4()}/events")
+
+    assert response.status_code == 404
 
 
-def test_http_sse_stream_emits_event_frame(
+def test_http_sse_stream_has_durable_event_headers(
     monkeypatch: pytest.MonkeyPatch, auth_client: tuple[TestClient, object, object]
 ) -> None:
     client, engine, token_file = auth_client
@@ -100,17 +102,34 @@ def test_http_sse_stream_emits_event_frame(
         run = RunRepository(session).create("Inspect payments-api", "mock", "mock")
         run_id = run.id
 
-    async def finite_stream(run_id):
-        del run_id
-        yield "id: 7\nevent: run.updated\ndata: {\"status\": \"running\"}\n\n"
+    async def finite_stream(*_: object, **__: object) -> AsyncIterator[str]:
+        yield 'id: 7\nevent: run.updated\ndata: {"status": "running"}\n\n'
 
     from app.api import runs as runs_api
 
-    monkeypatch.setattr(runs_api, "stream_events", finite_stream)
+    monkeypatch.setattr(runs_api, "stream_run_events", finite_stream)
     authenticate_client(client, token_file)
-    response = client.get(f"/api/runs/{run_id}/events")
+    response = client.get(f"/api/runs/{run_id}/events", headers={"Last-Event-ID": "2"})
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
-    assert "event: run.updated" in response.text
-    assert 'data: {"status": "running"}' in response.text
+    assert response.headers["cache-control"] == "no-cache"
+    assert response.headers["x-accel-buffering"] == "no"
+    assert "id: 7" in response.text
+
+
+def test_generic_events_stream_accepts_events_without_run_id(
+    monkeypatch: pytest.MonkeyPatch, auth_client: tuple[TestClient, object, object]
+) -> None:
+    client, _, token_file = auth_client
+    from app.api import events as events_api
+
+    async def finite_stream(*_: object, **__: object) -> AsyncIterator[str]:
+        yield 'id: 9\nevent: adapter.event.proposed\ndata: {"source": "adapter"}\n\n'
+
+    monkeypatch.setattr(events_api, "stream_events", finite_stream)
+    authenticate_client(client, token_file)
+    response = client.get("/api/v1/events?after=8")
+
+    assert response.status_code == 200
+    assert "event: adapter.event.proposed" in response.text

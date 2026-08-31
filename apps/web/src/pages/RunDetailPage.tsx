@@ -22,7 +22,8 @@ export function RunDetailPage() {
     return api.getRun(runId).then(setDetail).catch(() => setError("This run could not be loaded."));
   }, [runId]);
   useEffect(() => { void load(); }, [load]);
-  const connection = useRunEvents(runId, useCallback(() => { void load(); }, [load]));
+  const reload = useCallback(() => { void load(); }, [load]);
+  const connection = useRunEvents(runId, reload, reload);
 
   if (error) return <div className="page-shell"><Link className="back-link" to="/">← Back to runs</Link><div className="error-panel"><span className="eyebrow">Safe error</span><h1>Run unavailable</h1><p>{error}</p></div></div>;
   if (!detail) return <div className="page-shell"><div className="loading-row">Loading run detail…</div></div>;

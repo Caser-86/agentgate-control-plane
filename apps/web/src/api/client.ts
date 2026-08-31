@@ -13,6 +13,11 @@ import type {
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 export const apiBaseUrl = API_BASE_URL;
 
+export function eventStreamUrl(runId: string, after: number): string {
+  const params = new URLSearchParams({ after: String(Math.max(after, 0)) });
+  return `${API_BASE_URL}/api/runs/${encodeURIComponent(runId)}/events?${params}`;
+}
+
 let csrfToken: string | null = null;
 
 export function setCsrfToken(token: string | null): void {

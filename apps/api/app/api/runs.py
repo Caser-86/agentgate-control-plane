@@ -1,18 +1,17 @@
-import asyncio
 import json
 import logging
 from collections.abc import AsyncIterator
 from typing import Annotated, cast
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlmodel import Session
 
 from app.auth.dependencies import require_csrf, require_operator
 from app.auth.models import Operator
 from app.config import get_settings
-from app.db import get_session
+from app.db import get_engine, get_session
 from app.models import AgentRun, AuditEvent, ToolAction
 from app.repositories import ActionRepository, AuditRepository, RunRepository
 from app.schemas import (
@@ -23,7 +22,7 @@ from app.schemas import (
     ToolActionResponse,
 )
 from app.services.audit import redact
-from app.services.events import EventBroker, RunEvent, event_broker, event_to_sse
+from app.services.outbox import effective_cursor, stream_outbox_events
 from app.services.runs import RunService
 
 router = APIRouter(prefix="/api/runs", tags=["runs"])
@@ -79,14 +78,6 @@ def to_audit_response(event: AuditEvent) -> AuditEventResponse:
     )
 
 
-def format_sse(event_id: int, event_type: str, payload: dict[str, object]) -> str:
-    return (
-        f"id: {event_id}\n"
-        f"event: {event_type}\n"
-        f"data: {json.dumps(payload, ensure_ascii=False, default=str)}\n\n"
-    )
-
-
 def _final_text(run: AgentRun) -> str | None:
     for message in reversed(run.messages()):
         if message.get("role") == "assistant" and isinstance(message.get("content"), str):
@@ -128,51 +119,32 @@ def get_run(run_id: UUID, session: SessionDep, _: OperatorDep) -> RunDetailRespo
     return RunDetailResponse(
         **to_run_response(run).model_dump(),
         actions=[
-            to_action_response(action)
-            for action in ActionRepository(session).list_for_run(run_id)
+            to_action_response(action) for action in ActionRepository(session).list_for_run(run_id)
         ],
         audit_events=[to_audit_response(event) for event in AuditRepository(session).list(run_id)],
         final_text=_final_text(run),
     )
 
 
-async def stream_events(
-    run_id: UUID, broker: EventBroker = event_broker
-) -> AsyncIterator[str]:
-    stream = broker.subscribe(run_id)
-    event_task: asyncio.Task[RunEvent] = asyncio.create_task(stream.__anext__())
-    heartbeat_task: asyncio.Task[None] = asyncio.create_task(asyncio.sleep(15))
-    try:
-        while True:
-            done, _ = await asyncio.wait(
-                {event_task, heartbeat_task}, return_when=asyncio.FIRST_COMPLETED
-            )
-            if heartbeat_task in done:
-                yield ": heartbeat\n\n"
-                heartbeat_task = asyncio.create_task(asyncio.sleep(15))
-            if event_task in done:
-                try:
-                    event = event_task.result()
-                except StopAsyncIteration:
-                    return
-                yield event_to_sse(event)
-                event_task = asyncio.create_task(stream.__anext__())
-    finally:
-        event_task.cancel()
-        heartbeat_task.cancel()
-        await asyncio.gather(event_task, heartbeat_task, return_exceptions=True)
-        await stream.aclose()
+def stream_run_events(run_id: UUID, cursor: int) -> AsyncIterator[str]:
+    return stream_outbox_events(lambda: Session(get_engine()), cursor=cursor, resource_id=run_id)
 
 
 @router.get("/{run_id}/events")
-async def run_events(run_id: UUID, session: SessionDep, _: OperatorDep) -> StreamingResponse:
+async def run_events(
+    run_id: UUID,
+    session: SessionDep,
+    _: OperatorDep,
+    after: Annotated[str | None, Query()] = None,
+    last_event_id: Annotated[str | None, Header()] = None,
+) -> StreamingResponse:
     if RunRepository(session).get(run_id) is None:
         raise HTTPException(
             status_code=404,
             detail={"code": "not_found", "message": "run was not found"},
         )
     return StreamingResponse(
-        stream_events(run_id),
+        stream_run_events(run_id, effective_cursor(last_event_id=last_event_id, after=after)),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

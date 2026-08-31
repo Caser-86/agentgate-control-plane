@@ -23,7 +23,9 @@ class RunRepository:
     def __init__(self, session: Session) -> None:
         self.session = session
 
-    def create(self, user_request: str, provider: str, model: str) -> AgentRun:
+    def create(
+        self, user_request: str, provider: str, model: str, *, commit: bool = True
+    ) -> AgentRun:
         run = AgentRun(
             user_request=user_request,
             provider=provider,
@@ -31,7 +33,10 @@ class RunRepository:
             conversation_json="[]",
         )
         self.session.add(run)
-        self.session.commit()
+        if commit:
+            self.session.commit()
+        else:
+            self.session.flush()
         self.session.refresh(run)
         return run
 
@@ -44,7 +49,7 @@ class RunRepository:
         return builtins_list(self.session.exec(statement).all())
 
     def set_status(
-        self, run_id: UUID, expected: set[RunStatus], target: RunStatus
+        self, run_id: UUID, expected: set[RunStatus], target: RunStatus, *, commit: bool = True
     ) -> bool:
         statement = (
             update(AgentRun)
@@ -55,11 +60,19 @@ class RunRepository:
             .values(status=target, updated_at=utc_now())
         )
         result = self.session.exec(statement)
-        self.session.commit()
+        if commit:
+            self.session.commit()
+        else:
+            self.session.flush()
         return result.rowcount == 1
 
     def save_checkpoint(
-        self, run_id: UUID, messages: builtins_list[dict[str, object]], step_count: int
+        self,
+        run_id: UUID,
+        messages: builtins_list[dict[str, object]],
+        step_count: int,
+        *,
+        commit: bool = True,
     ) -> None:
         statement = (
             update(AgentRun)
@@ -71,16 +84,22 @@ class RunRepository:
             )
         )
         self.session.exec(statement)
-        self.session.commit()
+        if commit:
+            self.session.commit()
+        else:
+            self.session.flush()
 
 
 class ActionRepository:
     def __init__(self, session: Session) -> None:
         self.session = session
 
-    def create(self, action: ToolAction) -> ToolAction:
+    def create(self, action: ToolAction, *, commit: bool = True) -> ToolAction:
         self.session.add(action)
-        self.session.commit()
+        if commit:
+            self.session.commit()
+        else:
+            self.session.flush()
         self.session.refresh(action)
         return action
 
@@ -88,13 +107,20 @@ class ActionRepository:
         return self.session.get(ToolAction, action_id)
 
     def list_for_run(self, run_id: UUID) -> list[ToolAction]:
-        statement = select(ToolAction).where(cast(Any, ToolAction.run_id) == run_id).order_by(
-            cast(Any, ToolAction.created_at)
+        statement = (
+            select(ToolAction)
+            .where(cast(Any, ToolAction.run_id) == run_id)
+            .order_by(cast(Any, ToolAction.created_at))
         )
         return builtins_list(self.session.exec(statement).all())
 
     def transition(
-        self, action_id: UUID, expected: set[ActionStatus], target: ActionStatus
+        self,
+        action_id: UUID,
+        expected: set[ActionStatus],
+        target: ActionStatus,
+        *,
+        commit: bool = True,
     ) -> bool:
         statement = (
             update(ToolAction)
@@ -105,7 +131,10 @@ class ActionRepository:
             .values(status=target, decided_at=utc_now())
         )
         result = self.session.exec(statement)
-        self.session.commit()
+        if commit:
+            self.session.commit()
+        else:
+            self.session.flush()
         return result.rowcount == 1
 
 
