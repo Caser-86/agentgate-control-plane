@@ -6,6 +6,14 @@ from pathlib import Path
 from typing import Protocol
 
 
+def _normalize_dpapi_result(result: object, operation: str) -> bytes:
+    if isinstance(result, bytes):
+        return result
+    if isinstance(result, tuple) and len(result) == 2 and isinstance(result[1], bytes):
+        return result[1]
+    raise ValueError(f"Crypt{operation}Data returned an invalid result shape")
+
+
 class Protector(Protocol):
     def protect(self, value: bytes) -> bytes: ...
 
@@ -18,8 +26,9 @@ class DPAPIProtector:
             import win32crypt  # type: ignore[import-untyped]
         except ImportError as error:
             raise RuntimeError("Windows DPAPI support is unavailable") from error
-        return bytes(
-            win32crypt.CryptProtectData(value, "AgentGate Worker", None, None, None, 0)[1]
+        return _normalize_dpapi_result(
+            win32crypt.CryptProtectData(value, "AgentGate Worker", None, None, None, 0),
+            "Protect",
         )
 
     def unprotect(self, value: bytes) -> bytes:
@@ -27,7 +36,9 @@ class DPAPIProtector:
             import win32crypt  # type: ignore[import-untyped]
         except ImportError as error:
             raise RuntimeError("Windows DPAPI support is unavailable") from error
-        return bytes(win32crypt.CryptUnprotectData(value, None, None, None, 0)[1])
+        return _normalize_dpapi_result(
+            win32crypt.CryptUnprotectData(value, None, None, None, 0), "Unprotect"
+        )
 
 
 @dataclass(frozen=True)

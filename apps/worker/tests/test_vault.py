@@ -45,3 +45,25 @@ def test_dpapi_vault_round_trips_real_win32crypt_tuple(monkeypatch, tmp_path: ob
     credentials = WorkerCredentials("worker-1", "restart-safe-token", "1.0")
     WorkerVault(path, protector=DPAPIProtector()).save(credentials)
     assert WorkerVault(path, protector=DPAPIProtector()).load() == credentials
+
+
+def test_dpapi_vault_round_trips_raw_bytes_protect_and_tuple_unprotect(
+    monkeypatch, tmp_path: object
+) -> None:
+    def protect(value, *args):
+        return value[::-1]
+
+    def unprotect(value, *args):
+        return ("description", value[::-1])
+
+    monkeypatch.setitem(
+        sys.modules,
+        "win32crypt",
+        SimpleNamespace(CryptProtectData=protect, CryptUnprotectData=unprotect),
+    )
+    from agentgate_worker.vault import DPAPIProtector
+
+    path = tmp_path / "worker-credentials.bin"  # type: ignore[operator]
+    credentials = WorkerCredentials("worker-1", "raw-bytes-token", "1.0")
+    WorkerVault(path, protector=DPAPIProtector()).save(credentials)
+    assert WorkerVault(path, protector=DPAPIProtector()).load() == credentials
