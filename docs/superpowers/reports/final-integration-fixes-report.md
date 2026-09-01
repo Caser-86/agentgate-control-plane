@@ -1,5 +1,25 @@
 # Final integration fixes verification report
 
+## Current final verification — 2026-09-01
+
+This section is the current verdict and supersedes earlier limitation notes below where they describe checks that had not yet been rerun.
+
+### Post-review fixes
+
+- Worker enrollment now consumes the enrollment credential with an atomic conditional `UPDATE`; a concurrent loser receives `invalid_enrollment_token`, and registration failures roll back the token consumption and Worker row together.
+- Operators now carry a unique `installation_key`; migration `0008_operator_installation_key` refuses to silently migrate multiple historical operators, and setup maps a database uniqueness conflict to `setup_already_completed` after rollback.
+
+### Fresh evidence
+
+- API: `175 passed, 6 skipped`; Ruff on `app`: passed; mypy: passed for 53 source files; deterministic eval: 6 scenarios, all `4/4 PASS`.
+- Worker: `20 passed`; Worker source Ruff: passed.
+- Web: Vitest `28 passed`; lint, typecheck and production build passed.
+- Playwright: `2 passed` on temporary API ports `18220/18221`, including the Chinese first-run login and approval/audit flows.
+- Docker: full `docker compose build` passed; `docker compose config --quiet` and PowerShell contract checks passed.
+- Fresh isolated Compose stack on loopback ports `18390/18391` passed `verify-foundation.ps1` with a new PostgreSQL volume. The database reported migration head `0008_operator_installation_key` and `ix_operators_installation_key`; an in-container two-thread enrollment race produced exactly one successful registration and one `invalid_enrollment_token`.
+
+The six skipped API tests are PostgreSQL fixture tests that require `AGENTGATE_TEST_DATABASE_URL`. The isolated PostgreSQL Compose migration, foundation round trip, and enrollment race above provide live database evidence; the standard fixture remains skipped because no disposable test URL was configured.
+
 ## Worker loopback boundary and explicit URL fix — 2026-09-01
 
 ### Changes

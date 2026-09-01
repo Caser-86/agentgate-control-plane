@@ -6,6 +6,7 @@ from typing import Annotated, Any, cast
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from sqlalchemy import update
 from sqlmodel import Session, select
 
 from app.auth.models import ClientToken
@@ -137,40 +138,60 @@ def register_worker(
     session: Session, request: RegisterWorkerRequest, enrollment_token: str
 ) -> RegisteredWorker:
     _require_protocol(request.protocol_version, PROTOCOL_VERSION)
-    enrollment = session.exec(
-        select(ClientToken).where(
-            ClientToken.token_digest == digest_secret(enrollment_token),
-            cast(Any, ClientToken.revoked_at).is_(None),
-        )
-    ).first()
-    if enrollment is None or "worker:enroll" not in enrollment.scopes:
-        raise WorkerProtocolError(401, "invalid_enrollment_token")
-    if enrollment.expires_at is not None:
-        expires_at = enrollment.expires_at
-        if expires_at.tzinfo is None:
-            expires_at = expires_at.replace(tzinfo=UTC)
-        if expires_at <= utc_now():
+    try:
+        enrollment = session.exec(
+            select(ClientToken).where(
+                ClientToken.token_digest == digest_secret(enrollment_token),
+                cast(Any, ClientToken.revoked_at).is_(None),
+            )
+        ).first()
+        if enrollment is None or "worker:enroll" not in enrollment.scopes:
             raise WorkerProtocolError(401, "invalid_enrollment_token")
-    raw_worker_token = new_secret()
-    worker = WorkerRegistration(
-        name=request.name,
-        version=request.version,
-        protocol_version=request.protocol_version,
-        capabilities=sorted(request.capabilities),
-        token_digest=digest_secret(raw_worker_token),
-    )
-    enrollment.revoked_at = utc_now()
-    session.add(worker)
-    session.add(enrollment)
-    session.flush()
-    _audit(
-        session,
-        event_type="worker.registered",
-        worker_id=worker.id,
-        payload={"capabilities": worker.capabilities, "protocol_version": worker.protocol_version},
-    )
-    session.commit()
-    return RegisteredWorker(worker.id, raw_worker_token, worker.protocol_version)
+        now = utc_now()
+        if enrollment.expires_at is not None:
+            expires_at = enrollment.expires_at
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=UTC)
+            if expires_at <= now:
+                raise WorkerProtocolError(401, "invalid_enrollment_token")
+        consumed = session.exec(
+            update(ClientToken)
+            .where(
+                cast(Any, ClientToken.id) == enrollment.id,
+                cast(Any, ClientToken.revoked_at).is_(None),
+                (
+                    cast(Any, ClientToken.expires_at).is_(None)
+                    | (cast(Any, ClientToken.expires_at) > now)
+                ),
+            )
+            .values(revoked_at=now)
+        )
+        if consumed.rowcount != 1:
+            raise WorkerProtocolError(401, "invalid_enrollment_token")
+        raw_worker_token = new_secret()
+        worker = WorkerRegistration(
+            name=request.name,
+            version=request.version,
+            protocol_version=request.protocol_version,
+            capabilities=sorted(request.capabilities),
+            token_digest=digest_secret(raw_worker_token),
+        )
+        session.add(worker)
+        session.flush()
+        _audit(
+            session,
+            event_type="worker.registered",
+            worker_id=worker.id,
+            payload={
+                "capabilities": worker.capabilities,
+                "protocol_version": worker.protocol_version,
+            },
+        )
+        session.commit()
+        return RegisteredWorker(worker.id, raw_worker_token, worker.protocol_version)
+    except Exception:
+        session.rollback()
+        raise
 
 
 def heartbeat(session: Session, *, worker_id: UUID, protocol_version: str) -> None:

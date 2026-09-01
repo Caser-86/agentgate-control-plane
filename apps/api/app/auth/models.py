@@ -12,6 +12,7 @@ class Operator(SQLModel, table=True):
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     password_hash: str
+    installation_key: str = Field(default="operator", unique=True, index=True)
     created_at: datetime = Field(default_factory=utc_now, index=True)
 
 

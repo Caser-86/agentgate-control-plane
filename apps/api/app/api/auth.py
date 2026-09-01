@@ -4,6 +4,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.auth.dependencies import SESSION_COOKIE, require_csrf, require_operator
@@ -77,9 +78,13 @@ def setup(request: SetupRequest, response: Response, session: SessionDep) -> Aut
         raise _error(403, "invalid_or_expired_bootstrap_token")
     operator = Operator(password_hash=hash_password(request.password))
     session.add(operator)
-    session.flush()
-    session_token, _ = create_web_session(session, operator, get_settings())
-    session.commit()
+    try:
+        session.flush()
+        session_token, _ = create_web_session(session, operator, get_settings())
+        session.commit()
+    except IntegrityError:
+        session.rollback()
+        raise _error(409, "setup_already_completed") from None
     Path(bootstrap_file(get_settings())).unlink(missing_ok=True)
     _set_session_cookie(response, session_token)
     return AuthStatusResponse(authenticated=True, setup_required=False)

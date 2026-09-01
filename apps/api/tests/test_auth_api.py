@@ -130,6 +130,18 @@ def test_bootstrap_issuance_slot_is_unique_in_the_database(
             session.commit()
 
 
+def test_operator_installation_slot_is_unique_in_the_database(
+    auth_client: tuple[TestClient, object, Path]
+) -> None:
+    _, engine, _ = auth_client
+    with Session(engine) as session:
+        session.add(Operator(password_hash="hash-placeholder"))
+        session.commit()
+        session.add(Operator(password_hash="second-hash-placeholder"))
+        with pytest.raises(IntegrityError):
+            session.commit()
+
+
 def test_state_change_without_csrf_is_rejected(
     auth_client: tuple[TestClient, object, Path]
 ) -> None:

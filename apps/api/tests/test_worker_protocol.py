@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor
 from uuid import UUID
 
 from fastapi.testclient import TestClient
@@ -10,6 +11,12 @@ from app.control.enums import TaskKind, TaskStatus
 from app.control.models import ControlTask, OutboxEvent, WorkerExecutionGrant, WorkerRegistration
 from app.control.repositories import enqueue_task
 from app.models import utc_now
+from app.services.worker_protocol import (
+    RegisterWorkerRequest,
+    RegisteredWorker,
+    WorkerProtocolError,
+    register_worker,
+)
 
 PROTOCOL_VERSION = "1.0"
 SELF_CHECK_CAPABILITY = "platform.self_check"
@@ -115,6 +122,36 @@ def test_registration_issues_distinct_worker_token_and_consumes_enrollment(
         assert registration.token_digest != identity["token"]
         assert enrollment is not None
         assert enrollment.revoked_at is not None
+
+
+def test_concurrent_registration_consumes_enrollment_token_once(
+    postgres_session_pair: tuple[Session, Session],
+) -> None:
+    """Two hosts racing to enroll must produce at most one Worker registration."""
+    session_a, _ = postgres_session_pair
+    engine = session_a.get_bind()
+    enrollment_token = _issue_enrollment_token(engine, "-concurrent")
+
+    def attempt(name: str) -> RegisteredWorker | str:
+        request = RegisterWorkerRequest(
+            name=name,
+            version="0.1.0",
+            protocol_version=PROTOCOL_VERSION,
+            capabilities=[SELF_CHECK_CAPABILITY],
+        )
+        with Session(engine) as session:
+            try:
+                return register_worker(session, request, enrollment_token)
+            except WorkerProtocolError as error:
+                return error.code
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(attempt, ["racing-worker-a", "racing-worker-b"]))
+
+    assert sum(isinstance(result, RegisteredWorker) for result in results) == 1
+    assert [result for result in results if isinstance(result, str)] == [
+        "invalid_enrollment_token"
+    ]
 
 
 def test_worker_cannot_claim_without_registered_capability(
