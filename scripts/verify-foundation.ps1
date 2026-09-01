@@ -56,14 +56,33 @@ $check = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:$apiPort/api/v1/c
     -ContentType "application/json" `
     -Body (@{ check_type = "platform.self_check"; target = "local"; parameters = @{}; idempotency_key = "verify-foundation:$([Guid]::NewGuid())" } | ConvertTo-Json -Compress)
 if ($null -eq $check.id) { throw "Foundation self-check did not return a task id." }
+$maxWorkerAttempts = 3
+$checkStatus = $null
+$workerSucceeded = $false
 $workerStateDir = Join-Path ([System.IO.Path]::GetTempPath()) ("agentgate-worker-verify-" + [Guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $workerStateDir -Force | Out-Null
 try {
-    & (Join-Path $repoRoot "scripts\start-worker.ps1") `
-        -ApiUrl "http://127.0.0.1:$apiPort" `
-        -StateDir $workerStateDir `
-        -EnrollmentToken $WorkerEnrollmentToken
-    if ($LASTEXITCODE -ne 0) { throw "Native Worker self-check round trip failed." }
+    for ($attempt = 1; $attempt -le $maxWorkerAttempts; $attempt++) {
+        & (Join-Path $repoRoot "scripts\start-worker.ps1") `
+            -ApiUrl "http://127.0.0.1:$apiPort" `
+            -StateDir $workerStateDir `
+            -EnrollmentToken $WorkerEnrollmentToken
+        if ($LASTEXITCODE -ne 0) { throw "Native Worker self-check attempt $attempt of $maxWorkerAttempts failed." }
+
+        try {
+            $checkStatus = Invoke-RestMethod -Headers @{ Authorization = "Bearer $WorkerCheckToken" } -Uri "http://127.0.0.1:$apiPort/api/v1/checks/$($check.id)" -TimeoutSec 5
+        } catch {
+            throw "Submitted foundation self-check status could not be read after Worker attempt $attempt of $maxWorkerAttempts."
+        }
+        if ($null -eq $checkStatus -or "$($checkStatus.id)" -ne "$($check.id)") { throw "Submitted foundation self-check task was not found after Worker attempt $attempt." }
+        if ($checkStatus.status -eq "succeeded") {
+            $workerSucceeded = $true
+            break
+        }
+        if ($checkStatus.status -eq "failed") { throw "Submitted foundation self-check failed after Worker attempt $attempt." }
+        if ($checkStatus.status -notin @("queued", "running")) { throw "Submitted foundation self-check reached unexpected status '$($checkStatus.status)'." }
+    }
+    if (-not $workerSucceeded) { throw "Submitted foundation self-check remained queued or running after $maxWorkerAttempts Worker attempts (timed out)." }
 } finally {
     if (Test-Path -LiteralPath $workerStateDir) {
         Remove-Item -LiteralPath (Join-Path $workerStateDir "credentials.bin") -Force -ErrorAction SilentlyContinue
@@ -71,14 +90,7 @@ try {
         Remove-Item -LiteralPath $workerStateDir -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
-$checkStatus = $null
-try {
-    $checkStatus = Invoke-RestMethod -Headers @{ Authorization = "Bearer $WorkerCheckToken" } -Uri "http://127.0.0.1:$apiPort/api/v1/checks/$($check.id)" -TimeoutSec 5
-} catch {
-    throw "Submitted foundation self-check status could not be read."
-}
-if ($null -eq $checkStatus -or "$($checkStatus.id)" -ne "$($check.id)") { throw "Submitted foundation self-check task was not found." }
-if ($checkStatus.status -ne "succeeded" -or $null -eq $checkStatus.result) { throw "Submitted foundation self-check did not reach succeeded." }
+if ($null -eq $checkStatus.result) { throw "Submitted foundation self-check did not return a result." }
 $allowedResultKeys = @("status", "detail", "worker_version", "protocol_version", "capabilities")
 $resultKeys = @($checkStatus.result.PSObject.Properties.Name)
 if ($checkStatus.result.status -ne "succeeded" -or @($resultKeys | Where-Object { $_ -notin $allowedResultKeys }).Count -gt 0) {
