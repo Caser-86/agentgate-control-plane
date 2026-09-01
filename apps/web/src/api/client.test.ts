@@ -18,6 +18,10 @@ describe("api client", () => {
     await expect(api.getRun("missing")).rejects.toEqual(
       expect.objectContaining({ code: "not_found", message: "Request failed", status: 404 }),
     );
+    expect(fetch).toHaveBeenCalledWith(
+      "http://localhost:8000/api/runs/missing",
+      expect.anything(),
+    );
   });
 
   it("builds a cursor-based event stream URL without relying on EventSource headers", () => {
@@ -41,10 +45,14 @@ describe("api client", () => {
     expect(() => resolveApiBaseUrl({ apiBaseUrl })).toThrow();
   });
 
-  it.each(["http://localhost:18000", "https://127.0.0.1:18443", "http://[::1]:8000/"])(
+  it.each([
+    ["http://localhost:18000", "http://localhost:18000"],
+    ["https://127.0.0.1:18443", "https://127.0.0.1:18443"],
+    ["http://[::1]:8000/", "http://[::1]:8000"],
+  ])(
     "accepts loopback root URL %s",
-    (apiBaseUrl) => {
-      expect(resolveApiBaseUrl({ apiBaseUrl })).toBe(apiBaseUrl);
+    (apiBaseUrl, normalizedApiBaseUrl) => {
+      expect(resolveApiBaseUrl({ apiBaseUrl })).toBe(normalizedApiBaseUrl);
     },
   );
 });

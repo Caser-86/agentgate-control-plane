@@ -6,5 +6,5 @@ export function validateApiBaseUrl(apiBaseUrl: string): string {
       !["", "/"].includes(parsed.pathname)) {
     throw new Error("API base URL must be a loopback HTTP(S) root URL without credentials or query parameters.");
   }
-  return apiBaseUrl;
+  return apiBaseUrl.replace(/\/+$/, "");
 }
