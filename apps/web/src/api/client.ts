@@ -14,7 +14,7 @@ import { validateApiBaseUrl } from "./validate-api-base-url";
 export type RuntimeConfig = { apiBaseUrl?: string };
 
 export function resolveApiBaseUrl(runtimeConfig?: RuntimeConfig): string {
-  const configured = runtimeConfig?.apiBaseUrl ?? import.meta.env.VITE_API_BASE_URL ?? "";
+  const configured = (runtimeConfig?.apiBaseUrl ?? import.meta.env.VITE_API_BASE_URL ?? "").trim();
   return configured ? validateApiBaseUrl(configured) : "";
 }
 

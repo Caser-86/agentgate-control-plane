@@ -3,7 +3,7 @@ param(
     [string]$ApiUrl = "",
     [int]$ApiPort = 0,
     [string]$StateDir = ".agentgate-worker",
-    [string]$EnrollmentToken = $env:AGENTGATE_WORKER_ENROLLMENT_TOKEN
+    [string]$EnrollmentToken = ""
 )
 
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
@@ -54,6 +54,9 @@ elseif ($ApiPort -eq 0) {
 }
 if ($ApiPort -eq 0 -and $env:AGENTGATE_API_PORT) { $ApiPort = [int]$env:AGENTGATE_API_PORT }
 if ($ApiPort -lt 1 -or $ApiPort -gt 65535) { throw "ApiPort must be between 1 and 65535." }
+if ([string]::IsNullOrWhiteSpace($EnrollmentToken)) {
+    $EnrollmentToken = $env:AGENTGATE_WORKER_ENROLLMENT_TOKEN
+}
 $workerRoot = Join-Path $PSScriptRoot "..\apps\worker"
 $workerRoot = [System.IO.Path]::GetFullPath($workerRoot)
 $python = Join-Path $workerRoot ".venv\Scripts\python.exe"

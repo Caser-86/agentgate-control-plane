@@ -36,6 +36,10 @@ describe("api client", () => {
     expect(resolveApiBaseUrl(runtimeConfig)).not.toBe("http://localhost:8000");
   });
 
+  it("treats whitespace-only runtime API configuration as same-origin", () => {
+    expect(resolveApiBaseUrl({ apiBaseUrl: "   \t\n" })).toBe("");
+  });
+
   it.each([
     "https://example.com",
     "http://user:pass@localhost:8000",
