@@ -1,5 +1,5 @@
 from fastapi.testclient import TestClient
-from sqlalchemy import text
+from sqlalchemy import event, text
 from sqlmodel import Session
 
 from app.control.enums import TaskKind, TaskStatus, WorkerStatus
@@ -112,6 +112,52 @@ def test_platform_endpoints_handle_an_active_worker_and_queued_task(
     assert health_response.json()["checks"]["worker"]["status"] == "ok"
     assert self_check_response.status_code == 200
     assert self_check_response.json()["worker_heartbeat_age_seconds"] is not None
+
+
+def test_platform_endpoints_prefer_recent_heartbeat_over_active_worker_without_one(
+    auth_client: tuple[TestClient, object, object]
+) -> None:
+    client, engine, token_file = auth_client
+    authenticate_client(client, token_file)
+    with Session(engine) as session:
+        session.add_all(
+            [
+                WorkerRegistration(
+                    name="platform-check-worker-without-heartbeat",
+                    version="test",
+                    token_digest="platform-check-worker-null-heartbeat-digest",
+                    status=WorkerStatus.ACTIVE,
+                ),
+                WorkerRegistration(
+                    name="platform-check-worker-with-recent-heartbeat",
+                    version="test",
+                    token_digest="platform-check-worker-recent-heartbeat-digest",
+                    status=WorkerStatus.ACTIVE,
+                    last_heartbeat_at=utc_now(),
+                ),
+            ]
+        )
+        session.commit()
+
+    executed_sql: list[str] = []
+
+    def capture_sql(
+        _connection: object, _cursor: object, statement: str, *_args: object
+    ) -> None:
+        executed_sql.append(statement)
+
+    event.listen(engine, "before_cursor_execute", capture_sql)
+    try:
+        health_response = client.get("/api/platform/health")
+        self_check_response = client.get("/api/platform/self-check")
+    finally:
+        event.remove(engine, "before_cursor_execute", capture_sql)
+
+    assert health_response.status_code == 200
+    assert health_response.json()["checks"]["worker"]["status"] == "ok"
+    assert self_check_response.status_code == 200
+    assert self_check_response.json()["worker_heartbeat_age_seconds"] is not None
+    assert sum("NULLS LAST" in statement.upper() for statement in executed_sql) == 2
 
 
 def test_platform_self_check_rejects_a_stale_database_revision(

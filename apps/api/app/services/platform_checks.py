@@ -64,7 +64,7 @@ def platform_health(session: Session) -> dict[str, dict[str, object]]:
             Any,
             select(cast(Any, WorkerRegistration.last_heartbeat_at))
             .where(cast(Any, WorkerRegistration.status) == WorkerStatus.ACTIVE)
-            .order_by(cast(Any, WorkerRegistration.last_heartbeat_at).desc()),
+            .order_by(cast(Any, WorkerRegistration.last_heartbeat_at).desc().nullslast()),
         )
     ).scalar()
     heartbeat_age = _heartbeat_age_seconds(worker)
@@ -164,7 +164,7 @@ def platform_self_check(session: Session, settings: Settings) -> dict[str, objec
             Any,
             select(cast(Any, WorkerRegistration.last_heartbeat_at))
             .where(cast(Any, WorkerRegistration.status) == WorkerStatus.ACTIVE)
-            .order_by(cast(Any, WorkerRegistration.last_heartbeat_at).desc()),
+            .order_by(cast(Any, WorkerRegistration.last_heartbeat_at).desc().nullslast()),
         )
     ).scalar()
     stale_leases = session.exec(
