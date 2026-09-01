@@ -143,20 +143,20 @@ def platform_self_check(session: Session, settings: Settings) -> dict[str, objec
             details={"applied_revision": applied_migration_revision},
         )
 
-    queued = session.exec(
+    queued_available_at = session.exec(
         cast(
             Any,
-            select(ControlTask)
+            select(cast(Any, ControlTask.available_at))
             .where(cast(Any, ControlTask.status) == TaskStatus.QUEUED)
             .order_by(cast(Any, ControlTask.available_at)),
         )
-    ).first()
+    ).scalar()
     queue_latency_ms = None
-    if queued is not None:
+    if queued_available_at is not None:
         available_at = (
-            queued.available_at.replace(tzinfo=UTC)
-            if queued.available_at.tzinfo is None
-            else queued.available_at
+            queued_available_at.replace(tzinfo=UTC)
+            if queued_available_at.tzinfo is None
+            else queued_available_at
         )
         queue_latency_ms = max(0, int((utc_now() - available_at).total_seconds() * 1000))
     worker = session.exec(
