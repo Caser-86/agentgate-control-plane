@@ -2,8 +2,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlmodel import Session
 
-from app.control.enums import TaskKind, TaskStatus
-from app.control.models import ControlTask
+from app.control.enums import TaskKind, TaskStatus, WorkerStatus
+from app.control.models import ControlTask, WorkerRegistration
 from app.models import utc_now
 from tests.conftest import authenticate_client
 
@@ -77,6 +77,41 @@ def test_platform_self_check_reports_queue_latency_with_a_queued_control_task(
     queue_latency_ms = response.json()["queue_latency_ms"]
     assert isinstance(queue_latency_ms, int)
     assert 0 <= queue_latency_ms <= 5_000
+
+
+def test_platform_endpoints_handle_an_active_worker_and_queued_task(
+    auth_client: tuple[TestClient, object, object]
+) -> None:
+    client, engine, token_file = auth_client
+    authenticate_client(client, token_file)
+    with Session(engine) as session:
+        session.add(
+            WorkerRegistration(
+                name="platform-check-worker",
+                version="test",
+                token_digest="platform-check-worker-token-digest",
+                status=WorkerStatus.ACTIVE,
+                last_heartbeat_at=utc_now(),
+            )
+        )
+        session.add(
+            ControlTask(
+                kind=TaskKind.CONTROL,
+                status=TaskStatus.QUEUED,
+                capability="platform.self_check",
+                idempotency_key="platform-check-active-worker-regression",
+                available_at=utc_now(),
+            )
+        )
+        session.commit()
+
+    health_response = client.get("/api/platform/health")
+    self_check_response = client.get("/api/platform/self-check")
+
+    assert health_response.status_code == 200
+    assert health_response.json()["checks"]["worker"]["status"] == "ok"
+    assert self_check_response.status_code == 200
+    assert self_check_response.json()["worker_heartbeat_age_seconds"] is not None
 
 
 def test_platform_self_check_rejects_a_stale_database_revision(

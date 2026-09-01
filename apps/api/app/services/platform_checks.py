@@ -62,12 +62,12 @@ def platform_health(session: Session) -> dict[str, dict[str, object]]:
     worker = session.exec(
         cast(
             Any,
-            select(WorkerRegistration)
+            select(cast(Any, WorkerRegistration.last_heartbeat_at))
             .where(cast(Any, WorkerRegistration.status) == WorkerStatus.ACTIVE)
             .order_by(cast(Any, WorkerRegistration.last_heartbeat_at).desc()),
         )
-    ).first()
-    heartbeat_age = _heartbeat_age_seconds(worker.last_heartbeat_at if worker else None)
+    ).scalar()
+    heartbeat_age = _heartbeat_age_seconds(worker)
     checks["worker"] = check(
         status="ok" if heartbeat_age is not None and heartbeat_age <= 90 else "degraded",
         code=(
@@ -162,11 +162,11 @@ def platform_self_check(session: Session, settings: Settings) -> dict[str, objec
     worker = session.exec(
         cast(
             Any,
-            select(WorkerRegistration)
+            select(cast(Any, WorkerRegistration.last_heartbeat_at))
             .where(cast(Any, WorkerRegistration.status) == WorkerStatus.ACTIVE)
             .order_by(cast(Any, WorkerRegistration.last_heartbeat_at).desc()),
         )
-    ).first()
+    ).scalar()
     stale_leases = session.exec(
         cast(
             Any,
@@ -181,9 +181,7 @@ def platform_self_check(session: Session, settings: Settings) -> dict[str, objec
         "migration_check": migration_check,
         "queue_latency_ms": queue_latency_ms,
         "stale_lease_count": len(stale_leases),
-        "worker_heartbeat_age_seconds": _heartbeat_age_seconds(
-            worker.last_heartbeat_at if worker else None
-        ),
+        "worker_heartbeat_age_seconds": _heartbeat_age_seconds(worker),
         "provider": {
             "name": settings.llm_provider,
             "model": settings.llm_model,
