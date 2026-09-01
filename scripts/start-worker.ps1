@@ -27,6 +27,9 @@ if ($apiUrlSupplied) {
     if ($urlPort -eq -1) {
         $urlPort = if ($parsedApiUrl.Scheme -eq "https") { 443 } else { 80 }
     }
+    if ($ApiPort -ne 0 -and $ApiPort -ne $urlPort) {
+        throw "ApiUrl port $urlPort conflicts with explicit ApiPort $ApiPort."
+    }
     $ApiPort = [int]$urlPort
 }
 elseif ($ApiPort -eq 0) {

@@ -9,11 +9,13 @@ import type {
   RunDetail,
   ToolAction,
 } from "../types";
+import { validateApiBaseUrl } from "./validate-api-base-url";
 
 export type RuntimeConfig = { apiBaseUrl?: string };
 
 export function resolveApiBaseUrl(runtimeConfig?: RuntimeConfig): string {
-  return runtimeConfig?.apiBaseUrl ?? import.meta.env.VITE_API_BASE_URL ?? "";
+  const configured = runtimeConfig?.apiBaseUrl ?? import.meta.env.VITE_API_BASE_URL ?? "";
+  return configured ? validateApiBaseUrl(configured) : "";
 }
 
 const API_BASE_URL = resolveApiBaseUrl(

@@ -31,4 +31,20 @@ describe("api client", () => {
     expect(resolveApiBaseUrl(runtimeConfig)).toBe("http://localhost:18000");
     expect(resolveApiBaseUrl(runtimeConfig)).not.toBe("http://localhost:8000");
   });
+
+  it.each([
+    "https://example.com",
+    "http://user:pass@localhost:8000",
+    "http://localhost:8000/api",
+    "http://localhost:8000/?debug=1",
+  ])("rejects unsafe API base URL %s", (apiBaseUrl) => {
+    expect(() => resolveApiBaseUrl({ apiBaseUrl })).toThrow();
+  });
+
+  it.each(["http://localhost:18000", "https://127.0.0.1:18443", "http://[::1]:8000/"])(
+    "accepts loopback root URL %s",
+    (apiBaseUrl) => {
+      expect(resolveApiBaseUrl({ apiBaseUrl })).toBe(apiBaseUrl);
+    },
+  );
 });
