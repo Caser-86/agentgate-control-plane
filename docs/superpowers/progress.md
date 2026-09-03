@@ -1,5 +1,13 @@
 # 最终集成修复进度
 
+## 真实运行验收与 Ark 配置 — 2026-09-03
+
+- [x] 在隔离的本机 SQLite 实例中完成 HTTP 监控闭环：原生 Worker 注册、健康观测、服务停止后的 `failed`/`down` 与活动事件、服务恢复后的 `healthy`/事件关闭。
+- [x] 修复带有效期 enrollment token 的 SQLite 时间类型兼容问题；`start-worker.ps1` 现在会正确向上传递 Worker 失败退出码。
+- [x] 当前正式 Compose 已使用 `openai_compatible` 提供方，加载 Ark Base URL 和 `ark-code-latest`；真实请求冒烟返回文本成功。
+- [x] 最新修复已推送到公共仓库 `master`，远端 HEAD 为 `cab61b9`。
+- [ ] 正式 Postgres 实例尚未添加用户自己的监控目标或 Native Worker 凭据；这一步需要在 Web 中使用已设置的管理员密码创建 Worker enrollment token，不能由脚本读取或绕过。
+
 ## 最终本地端口/Worker 修复轮次 — 2026-09-01
 
 - [x] 在 Compose 回环绑定、API CORS、Vite 开发代理和构建后的 Web 运行时配置之间统一 `AGENTGATE_API_PORT`/`AGENTGATE_WEB_PORT`；安全默认值仍然只允许 localhost，远程目标仍不支持。
