@@ -63,7 +63,7 @@ describe("RunDetailPage", () => {
       created_at: "2026-08-31T00:00:00Z",
       updated_at: "2026-08-31T00:00:00Z",
       error_message: null,
-      final_text: "Completed safely.",
+      final_text: "检查已安全完成。",
       actions: [
         {
           id: "action-1",
@@ -97,7 +97,7 @@ describe("RunDetailPage", () => {
       </MemoryRouter>,
     );
 
-    expect(await screen.findByText("Completed safely.")).toBeInTheDocument();
+    expect(await screen.findByText("检查已安全完成。")).toBeInTheDocument();
     expect(screen.getByText("get_service_health")).toBeInTheDocument();
     expect(screen.queryByText("secret")).not.toBeInTheDocument();
   });

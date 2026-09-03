@@ -27,4 +27,24 @@ describe("LoginPage", () => {
       expect(screen.getByRole("button", { name: "重试" })).toBeInTheDocument();
     });
   });
+
+  it("shows the six-character minimum for the setup password", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ authenticated: false, setup_required: true }), {
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+    render(
+      <MemoryRouter>
+        <AuthProvider><LoginPage /></AuthProvider>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(screen.getByText("初始化管理员密码")).toBeInTheDocument());
+    expect(screen.getByLabelText("管理员密码")).toHaveAttribute("minlength", "6");
+    expect(screen.getByText("管理员密码至少 6 位")).toBeInTheDocument();
+  });
 });

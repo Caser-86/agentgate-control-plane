@@ -16,3 +16,4 @@ eval-results.json
 .agentgate/
 apps/worker/.agentgate-worker/
 .worktrees/
+.superpowers/

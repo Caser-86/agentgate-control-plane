@@ -1,64 +1,364 @@
-# AgentGate
+# AgentGate 本地 AI Agent 控制平面
 
-AgentGate is a local-first control plane that turns agent tool calls into observable, policy-governed, approval-gated, resumable and auditable operations.
+AgentGate 是一个面向本机运行的 AI Agent 操作治理平台。它把 Agent 的“想做什么”与系统的“允许做什么、是否需要人工批准、执行后发生了什么”分开管理。
 
-![AgentGate local demo](docs/assets/local-demo.png)
+> 当前版本：Phase 0，本地控制流与安全边界演示
+>
+> 当前默认模型：`mock` 确定性提供方
+>
+> 当前部署方式：Windows + Docker Compose + 本机浏览器
 
-_Screenshot: local mock demo, not a production deployment._
+![AgentGate 本地控制台](docs/assets/local-demo.png)
 
-## Why this exists
+这张截图是本地演示界面，不代表生产部署或真实基础设施操作已经启用。
 
-Tool-calling agents can produce useful plans and unsafe side effects in the same loop. AgentGate puts a durable boundary between proposal and execution:
+## 目录
 
-1. Every tool is registered with explicit risk and read-only metadata.
-2. Low-risk inspection can run automatically, while state-changing actions pause for a human.
-3. Checkpoints, idempotency keys, SSE updates and append-only audit events make decisions recoverable and explainable.
+- [一、项目解决什么问题](#一项目解决什么问题)
+- [二、项目不负责什么](#二项目不负责什么)
+- [三、核心工作流程](#三核心工作流程)
+- [四、当前能力](#四当前能力)
+- [五、环境要求](#五环境要求)
+- [六、启动本地项目](#六启动本地项目)
+- [七、首次初始化和登录](#七首次初始化和登录)
+- [八、完成第一次演示](#八完成第一次演示)
+- [九、连接真实的 OpenAI-compatible 模型](#九连接真实的-openai-compatible-模型)
+- [十、接入其他 Agent](#十接入其他-agent)
+- [十一、原生 Worker](#十一原生-worker)
+- [十二、测试与验收](#十二测试与验收)
+- [十三、常见问题](#十三常见问题)
+- [十四、项目目录说明](#十四项目目录说明)
+- [十五、安全要求](#十五安全要求)
+- [十六、后续路线](#十六后续路线)
 
-The repository is intentionally scoped to agent action governance. It does not provide search, RAG, intelligence collection, or report generation.
+## 一、项目解决什么问题
 
-## Architecture
+普通的 Tool-calling Agent 会在同一个循环里同时完成以下事情：
+
+1. 理解用户目标。
+2. 选择工具。
+3. 生成工具参数。
+4. 执行可能改变系统状态的操作。
+
+如果模型生成了错误参数、调用了未登记工具，或者把“查询”误判成“修改”，就可能产生不可预期的副作用。AgentGate 在 Agent 与工具执行之间增加一个可持久化的控制边界：
+
+- 所有工具必须先登记，并声明风险级别和是否只读。
+- 工具参数必须通过模型校验。
+- 低风险只读操作可以自动执行。
+- 会改变状态的中风险操作暂停，等待人工批准或拒绝。
+- 高风险操作和未知工具默认拒绝。
+- 运行状态、审批决定、工具结果和审计事件保存到 PostgreSQL。
+- 运行中断后，可以根据检查点和持久化队列继续处理。
+- 审计接口和界面会递归脱敏敏感字段。
+
+因此，AgentGate 更接近“AI Agent 的安全控制平面、审批队列和审计台”，而不是一个新的大模型聊天窗口。
+
+## 二、项目不负责什么
+
+为了避免误用，当前版本明确不包含以下能力：
+
+- 不提供通用聊天、搜索、RAG、情报收集或报告生成。
+- 不会自动发现并监控电脑上所有 Agent；Agent 必须通过 AgentGate 的界面或 API 接入。
+- 不会在当前 Phase 0 中真正重启 Windows 服务。
+- 不允许任意执行 Shell、PowerShell 或其他命令。
+- 不允许任意读写文件。
+- 不会真正轮换 API 密钥或其他凭据。
+- `mock` 提供方不是具备真实推理能力的生产模型。
+- 外部 Agent 的 `/api/v1/actions` 当前用于策略预检，返回允许、需要审批或拒绝，不等于已经进入执行队列。
+
+当前演示里的 `payments-api` 和 `orders-api` 是数据库中的服务状态记录。调用 `restart_service` 只会把演示服务状态改为 `healthy` 并增加 `restart_count`，不会操作操作系统中的同名服务。
+
+## 三、核心工作流程
 
 ```mermaid
-flowchart LR
-    Browser[React console] --> API[FastAPI]
-    API --> Queue[Durable PostgreSQL queue]
-    Queue --> ControlWorker[control-worker]
-    API --> Runner[Checkpointed AgentRunner]
-    Runner --> Policy[Fail-closed PolicyEngine]
-    Runner --> Executor[Idempotent ToolExecutor]
-    Executor --> DB[(PostgreSQL + audit)]
-    API --> Scheduler[scheduler]
-    Scheduler --> DB
-    ControlWorker --> DB
-    Runner --> LLM[Mock or OpenAI-compatible provider]
+flowchart TD
+    A[用户或 Agent 提出任务] --> B[AgentRunner / 外部适配器]
+    B --> C[校验工具名称和参数]
+    C --> D{PolicyEngine 风险判断}
+    D -->|低风险且只读| E[自动批准]
+    D -->|中风险且会改状态| F[等待人工审批]
+    D -->|高风险、未知或参数错误| G[安全拒绝]
+    E --> H[ToolExecutor 执行一次]
+    F --> I{人工决定}
+    I -->|批准| H
+    I -->|拒绝| J[记录拒绝结果]
+    G --> J
+    H --> K[保存结果、检查点和审计事件]
+    J --> K
+    K --> L[运行继续、完成或安全失败]
 ```
 
-See [the detailed architecture](docs/architecture.md) for state machines, approval sequence and Phase 0 boundaries.
+系统中的关键边界如下：
 
-## 60-second quick start
+| 边界 | 作用 |
+| --- | --- |
+| `ToolRegistry` | 维护允许使用的工具、参数模型和处理器 |
+| `PolicyEngine` | 根据风险等级和只读属性做 fail-closed 决策 |
+| `AgentRunner` | 管理模型对话、工具提议、检查点和恢复 |
+| `ToolExecutor` | 以幂等键领取和执行工具，防止重复副作用 |
+| PostgreSQL | 保存运行、动作、队列、租约、审批和审计证据 |
+| `scheduler` | 回收过期租约、推动持久化任务 |
+| `control-worker` | 处理持久化控制任务 |
+| 原生 Worker | Phase 0 仅支持安全的 `platform.self_check` 协议 |
 
-要求：Windows、Docker Desktop、Python 3.11+、Node.js 24+ 和 PowerShell。Compose 默认只绑定本机：Web 为 `127.0.0.1:5173`，API 为 `127.0.0.1:8000`，PostgreSQL 不发布宿主机端口。需要换端口时，只设置 `AGENTGATE_API_PORT` 和 `AGENTGATE_WEB_PORT`；它们同时驱动 Compose loopback 端口、API CORS、Vite 开发代理和 Web 运行时 API 地址。仅支持 localhost/loopback，不支持远程 target。
+详细状态机和事务边界见 [架构说明](docs/architecture.md)。
+
+## 四、当前能力
+
+### 4.1 Web 控制台
+
+登录后可以看到三个主要页面：
+
+| 页面 | 用途 |
+| --- | --- |
+| `运行` | 创建 Agent 运行、查看状态、打开运行详情和审批动作 |
+| `策略` | 查看已登记工具、风险等级、只读属性和策略决定 |
+| `审计` | 按运行 ID、执行者或事件类型筛选审计事件，并导出 JSON |
+
+界面默认使用中文；工具名、状态值和事件类型会同时保留必要的英文代码，便于与 API、日志和测试对应。
+
+### 4.2 当前登记的工具
+
+| 工具 | 风险 | 是否只读 | 当前决定 | 当前行为 |
+| --- | --- | --- | --- | --- |
+| `get_service_health` | 低 | 是 | 自动批准 | 读取演示服务健康状态和重启次数 |
+| `search_logs` | 低 | 是 | 自动批准 | 读取演示诊断日志 |
+| `restart_service` | 中 | 否 | 需要审批 | 修改数据库中的演示服务状态 |
+| `rotate_api_key` | 高 | 否 | 拒绝 | 永远不会在本地演示中执行 |
+| `platform.self_check` | 低 | 是 | 自动批准 | 原生 Worker 协议自检，不执行 Shell 或文件操作 |
+
+### 4.3 运行状态
+
+一次运行可能经过以下状态：
+
+```text
+queued
+  -> running
+  -> waiting_approval
+  -> running
+  -> completed
+```
+
+出现超时或安全失败时可能进入 `failed`。某个工具动作还会单独记录 `proposed`、`pending_approval`、`approved`、`denied`、`running`、`succeeded` 等状态。
+
+## 五、环境要求
+
+本地运行需要：
+
+- Windows 10/11。
+- Docker Desktop，并确保 Docker Compose 可用。
+- Python 3.11 或更高版本；运行 API 测试时使用。
+- Node.js 24 或更高版本；安装 Web 依赖和运行前端测试时使用。
+- PowerShell。
+
+检查命令：
 
 ```powershell
-Set-Location apps/api
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
-Set-Location ..\web
-npm.cmd ci
-Set-Location ..\..
-.\scripts\setup-local.ps1
+docker --version
+docker compose version
+py --version
+node --version
+npm.cmd --version
 ```
 
-首次运行先启动 PostgreSQL、执行 `migrate-local.ps1`（调用 Alembic `upgrade head` 并显式使用 Compose 数据库 URL），再启动 API、scheduler、control-worker 和 Web；健康检查通过后才打开中文控制台。bootstrap token 只提示本机文件路径，脚本不会打印 token 内容。Mock mode 不需要 API key。停止服务：`powershell -File .\scripts\stop-local.ps1`。
+项目默认只绑定本机回环地址：
 
-手动迁移：`powershell -File .\scripts\migrate-local.ps1`。基础设施验收：`powershell -File .\scripts\verify-foundation.ps1`。Windows 前端命令统一使用 `npm.cmd`。
+| 服务 | 默认地址 | 说明 |
+| --- | --- | --- |
+| Web | `http://127.0.0.1:5173` | 浏览器访问的控制台 |
+| API | `http://127.0.0.1:8000` | 后端接口和健康检查 |
+| PostgreSQL | 不发布宿主机端口 | 只在 Compose 网络内使用 |
 
-原生 Worker 使用本地专用虚拟环境 `apps/worker/.venv`，不会复用 API 的 `.venv`。首次运行 `setup-local.ps1` 会幂等地创建该环境并执行 `pip install -e apps/worker`（包含 Windows `pywin32`/`win32crypt` 依赖）；验收脚本会检查解释器和依赖，缺失时给出同一 setup 命令。API/Web 的实际 loopback host 端口由 Compose 的 `AGENTGATE_API_PORT`/`AGENTGATE_WEB_PORT`（默认 8000/5173）解析，脚本不会假定 host 端口。
-手动启动原生 Worker 使用 `powershell -File .\scripts\start-worker.ps1`；不传参数时它从 `docker compose config --format json` 派生实际 API loopback 端口，也可传 `-ApiPort` 或本机 `-ApiUrl http://127.0.0.1:<port>`。远程 URL 会被拒绝。
+当前运行实例如果使用了自定义端口，通常访问：
 
-## Live OpenAI-compatible configuration
+```text
+http://127.0.0.1:15173
+```
 
-Copy `.env.example` to `.env`, rotate any key that has previously been exposed, and set only the backend variables:
+## 六、启动本地项目
+
+### 6.1 推荐启动方式：一键准备和启动
+
+在项目根目录执行：
+
+```powershell
+Set-Location 'D:\LLM Files\files\agentgate-control-plane'
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\setup-local.ps1
+```
+
+该脚本会：
+
+1. 创建或复用 `apps/worker/.venv`。
+2. 安装原生 Worker 依赖并检查 `win32crypt`。
+3. 安装 Web 依赖。
+4. 启动 PostgreSQL。
+5. 执行数据库迁移。
+6. 以 `mock` 提供方启动 API、scheduler、control-worker 和 Web。
+7. API 健康检查通过后打开本地控制台。
+
+脚本只打印 bootstrap token 的文件路径，不会把 token 内容打印到终端。首次初始化时，需要在本机受信任的 PowerShell 中读取该文件：
+
+```powershell
+Get-Content .\data\bootstrap-token
+```
+
+不要把这个 token、管理员密码或模型 API key 发送到聊天、截图、日志或 Git 仓库。
+
+### 6.2 使用自定义端口
+
+如果默认端口被其他程序占用，可以在启动前设置端口：
+
+```powershell
+Set-Location 'D:\LLM Files\files\agentgate-control-plane'
+
+$env:AGENTGATE_API_PORT = '18230'
+$env:AGENTGATE_WEB_PORT = '15173'
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-local.ps1 -Provider mock
+```
+
+然后打开：
+
+```text
+http://127.0.0.1:15173
+```
+
+端口必须是本机回环地址。当前脚本不支持把 API 或原生 Worker 指向远程服务器。
+
+### 6.3 查看服务状态
+
+```powershell
+Set-Location 'D:\LLM Files\files\agentgate-control-plane'
+docker compose ps
+Invoke-RestMethod http://127.0.0.1:18230/health
+```
+
+如果使用默认端口，把 `18230` 换成 `8000`。健康检查返回 `status: ok` 才表示 API 已经启动。
+
+### 6.4 停止项目
+
+```powershell
+Set-Location 'D:\LLM Files\files\agentgate-control-plane'
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\stop-local.ps1
+```
+
+停止脚本不会删除 PostgreSQL 数据卷，也不会删除 `.env` 或 `data/`。因此下次启动通常可以保留运行记录和管理员账号。
+
+### 6.5 仅执行数据库迁移
+
+```powershell
+Set-Location 'D:\LLM Files\files\agentgate-control-plane'
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\migrate-local.ps1
+```
+
+迁移由 Alembic 执行，生产代码不会用 `create_all()` 偷偷创建或覆盖数据库结构。
+
+## 七、首次初始化和登录
+
+### 7.1 第一次使用
+
+1. 打开 Web 地址。
+2. 页面显示“初始化管理员密码”时，读取本机 `data/bootstrap-token`。
+3. 把 token 填入“引导令牌”。
+4. 设置管理员密码，长度至少 6 位。
+5. 点击“完成初始化”。
+6. 初始化成功后会自动建立会话。
+
+bootstrap token 是一次性、短时有效的初始化凭据。初始化完成后，服务会删除 token 文件；之后登录只需要管理员密码。
+
+### 7.2 已经初始化过
+
+如果页面显示“登录”，只填写之前设置的管理员密码，不需要再填写引导令牌。
+
+当前版本没有用户名字段，也没有公开的密码重置页面。不要因为登录失败就删除数据库；先确认访问的是同一个端口、同一个浏览器地址和同一个本地数据目录。
+
+### 7.3 认证方式
+
+- Web 使用 HttpOnly 会话 Cookie。
+- 修改状态的 Web 请求需要 CSRF token。
+- 外部 Agent 使用带 scope 的 Bearer client token。
+- 原生 Worker 使用单独的 enrollment token 和 Worker token。
+- 管理员密码不会以明文存储。
+
+## 八、完成第一次演示
+
+### 8.1 查看策略
+
+登录后进入“策略”，先确认风险矩阵：
+
+- `读取服务健康状态`：低风险，只读，自动批准。
+- `查询服务日志`：低风险，只读，自动批准。
+- `重启服务`：中风险，会改变状态，需要审批。
+- `轮换 API 密钥`：高风险，直接拒绝。
+
+### 8.2 演示需要审批的恢复流程
+
+1. 进入“运行”。
+2. 选择示例：`恢复降级服务 → 需审批`。
+3. 点击“启动运行”。
+4. 查看 `get_service_health` 和 `search_logs` 自动执行。
+5. 等待 `restart_service` 出现待审批卡片。
+6. 检查目标服务、原因、风险级别和参数。
+7. 选择“批准”或“拒绝”。
+8. 回到运行时间线，查看审批事件、工具结果和最终状态。
+
+示例任务的实际文本是：
+
+```text
+检查 payments-api 并安全恢复，不要轮换凭据。
+```
+
+批准后，演示数据库中的 `payments-api` 会变为 `healthy`，`restart_count` 增加 1。这个变化只发生在演示状态表中。
+
+### 8.3 演示高风险拒绝
+
+1. 回到“运行”。
+2. 选择示例：`轮换 API 密钥 → 直接拒绝`。
+3. 点击“启动运行”。
+4. 查看 `rotate_api_key` 被策略直接拒绝。
+5. 确认没有审批卡片，也没有工具执行处理器。
+
+示例任务文本是：
+
+```text
+请轮换 payments-api 的 API 密钥。
+```
+
+不要在任务文本、测试数据或截图中填写真实 API key。
+
+### 8.4 查看审计记录
+
+进入“审计”后可以：
+
+- 按运行 ID 筛选一次运行的所有事件。
+- 按执行者筛选，例如 `user`、`agent`、`policy`、`tool`。
+- 按事件类型筛选，例如 `policy.decision`、`approval.approved`、`tool.succeeded`。
+- 展开事件查看脱敏后的 JSON。
+- 导出 `agentgate-audit.json`。
+
+审计事件是追加式记录，不应该通过界面修改。字段名包含 `api_key`、`authorization`、`token`、`secret` 或 `password` 时，会在 API 和审计边界递归脱敏。
+
+完整的 3–5 分钟演示流程见 [docs/demo.md](docs/demo.md)。
+
+## 九、连接真实的 OpenAI-compatible 模型
+
+### 9.1 什么时候需要真实模型
+
+第一次体验审批和审计流程时，建议使用 `mock`。它不需要 API key，输出稳定，便于判断是控制平面问题还是模型服务问题。
+
+只有在需要观察真实模型的工具选择、参数生成和最终回答时，才切换到 `openai_compatible`。
+
+### 9.2 配置位置
+
+复制模板到项目根目录的 `.env`。如果 `.env` 已存在，不要覆盖其中的本地数据库和认证配置：
+
+```powershell
+Set-Location 'D:\LLM Files\files\agentgate-control-plane'
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+```
+
+在 `.env` 中填写后端配置：
 
 ```dotenv
 AGENTGATE_LLM_PROVIDER=openai_compatible
@@ -67,60 +367,400 @@ AGENTGATE_LLM_API_KEY=your_api_key_here
 AGENTGATE_LLM_MODEL=your-model-name
 ```
 
-The frontend receives only provider/model metadata. Credentials are read by the backend provider adapter and are never sent to the browser, persisted in audit payloads, or rendered by the UI. The live provider smoke test is endpoint-specific and must be run only after validating the endpoint and rotating the key.
+`AGENTGATE_LLM_BASE_URL` 必须对应兼容 OpenAI Chat Completions 的服务，并且需要支持本项目使用的 tool calling 格式。某个厂商提供的 HTTP URL 是否兼容，不能只根据 URL 外观判断，应先查看该厂商的 API 文档或做单独的端点验证。
 
-## Safety model
-
-```text
-model proposal
-    -> registered tool + strict arguments
-    -> fail-closed policy decision
-       low read-only       -> auto approve -> execute once
-       medium state change -> pending approval -> approve/deny -> resume
-       high risk/unknown   -> deny -> record safe result -> resume
-```
-
-Approval is a conditional database transition. The executor claims an action atomically and stores the result under a unique run/tool-call idempotency key. Sensitive keys are recursively redacted at audit and API boundaries.
-
-## Tests and deterministic evals
+启动真实模型配置：
 
 ```powershell
-Set-Location apps/api
+Set-Location 'D:\LLM Files\files\agentgate-control-plane'
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-local.ps1 -Provider openai_compatible
+```
+
+### 9.3 安全边界
+
+- API key 只由后端读取。
+- 前端只显示 provider/model 元数据，不接收 API key。
+- API key 不写入运行记录、审计 payload 或浏览器。
+- 不要把 `.env` 提交到 Git。
+- 如果 key 曾经出现在聊天、截图或日志中，应先在模型服务侧轮换，再继续使用。
+- 真实模型仍然不能绕过 `ToolRegistry` 和 `PolicyEngine`。
+
+## 十、接入其他 Agent
+
+### 10.1 接入原则
+
+AgentGate 不会自动拦截其他软件中的 Agent。其他 Agent 需要成为一个适配器，通过受保护 API 提交事件、只读检查或动作提议。
+
+接入后，AgentGate 能够记录和约束“经过这些 API 的操作”；没有接入的 Agent 仍然不在监控范围内。
+
+### 10.2 Client token 和权限 scope
+
+当前支持的 client token scope：
+
+| Scope | 允许的接口 |
+| --- | --- |
+| `propose:events` | 提交 Agent 事件到审计流 |
+| `propose:checks` | 提交只读检查并查询控制任务状态 |
+| `propose:actions` | 对动作进行策略预检 |
+| `worker:enroll` | 注册原生 Worker |
+
+token 创建接口是管理员接口 `POST /api/auth/tokens`，需要管理员会话和 CSRF token。原始 token 只在创建响应中返回一次，应由调用方立即保存到本机安全存储。
+
+### 10.3 外部 API 摘要
+
+以下接口都位于本地 API，例如默认地址 `http://127.0.0.1:8000`：
+
+| 方法 | 路径 | 认证 | 当前用途 |
+| --- | --- | --- | --- |
+| `POST` | `/api/v1/events` | `propose:events` | 记录外部 Agent 事件 |
+| `POST` | `/api/v1/checks` | `propose:checks` | 提交只读控制检查 |
+| `GET` | `/api/v1/checks/{id}` | `propose:checks` | 查询检查任务状态 |
+| `POST` | `/api/v1/actions` | `propose:actions` | 预检动作策略 |
+| `GET` | `/api/auth/status` | 无 | 查询初始化/登录状态 |
+| `GET` | `/health` | 无 | API 存活检查 |
+
+动作预检示例：
+
+```powershell
+$headers = @{ Authorization = "Bearer <client-token>" }
+$body = @{
+    action_type = "restart_service"
+    target = "payments-api"
+    parameters = @{ reason = "恢复降级服务" }
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+    -Method Post `
+    -Uri "http://127.0.0.1:8000/api/v1/actions" `
+    -Headers $headers `
+    -ContentType "application/json" `
+    -Body $body
+```
+
+预期返回类似：
+
+```json
+{
+  "decision": "require_approval"
+}
+```
+
+这只是策略结果，不会替外部 Agent 创建 Web 运行，也不会自动执行重启。当前版本如果要完整体验“运行—审批—恢复”流程，应使用 Web 控制台的 `/api/runs` 流程。后续版本可以把外部动作提议接入统一的持久化审批队列。
+
+### 10.4 事件和检查的请求格式
+
+提交事件：
+
+```json
+{
+  "event_type": "agent.observation",
+  "payload": {
+    "service": "payments-api",
+    "message": "health check returned degraded"
+  }
+}
+```
+
+提交 Phase 0 自检：
+
+```json
+{
+  "check_type": "platform.self_check",
+  "target": "local",
+  "parameters": {},
+  "idempotency_key": "self-check-2026-09-01-001"
+}
+```
+
+自检必须使用 `target: local` 且参数为空。其他检查类型目前会被拒绝，因为 Phase 0 只开放安全自检协议。
+
+## 十一、原生 Worker
+
+原生 Worker 运行在 `apps/worker`，使用独立的 `apps/worker/.venv`，不能复用 `apps/api/.venv`。
+
+它的职责是：
+
+- 使用 enrollment token 注册到本地 API。
+- 保存 Worker 凭据和本地 journal。
+- 发送 heartbeat。
+- 领取 `platform.self_check` 任务。
+- 把安全自检结果报告回控制平面。
+
+当前 Worker 不支持：
+
+- 任意 Shell 或 PowerShell。
+- 任意文件读写。
+- 任意 Windows 服务管理。
+- 任意凭据读取或轮换。
+- 远程 API 地址。
+
+手动启动前先运行一次 `setup-local.ps1`，然后：
+
+```powershell
+Set-Location 'D:\LLM Files\files\agentgate-control-plane'
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-worker.ps1
+```
+
+如果 API 使用非默认端口，脚本会从 Compose 配置解析本机 API 端口，也可以显式指定：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-worker.ps1 -ApiUrl http://127.0.0.1:18230
+```
+
+## 十二、测试与验收
+
+### 12.1 准备 API 测试环境
+
+API 测试使用项目自己的虚拟环境：
+
+```powershell
+Set-Location 'D:\LLM Files\files\agentgate-control-plane'
+py -3.11 -m venv .\apps\api\.venv
+& .\apps\api\.venv\Scripts\python.exe -m pip install -e ".\apps\api[dev]"
+```
+
+### 12.2 准备 Web 测试环境
+
+```powershell
+Set-Location 'D:\LLM Files\files\agentgate-control-plane\apps\web'
+npm.cmd ci
+```
+
+Windows PowerShell 如果拦截了 `npm.ps1`，使用 `npm.cmd`，不需要把系统执行策略永久改成不受限制。
+
+### 12.3 API 检查
+
+```powershell
+Set-Location 'D:\LLM Files\files\agentgate-control-plane\apps\api'
+
 .\.venv\Scripts\python.exe -m ruff check app tests
 .\.venv\Scripts\python.exe -m mypy app
 .\.venv\Scripts\python.exe -m pytest -q
 .\.venv\Scripts\python.exe -m app.evals.runner
+```
 
-Set-Location ..\web
+确定性评测包含 6 个场景，每个场景有 4 个评分器：结果、轨迹、策略合规和幂等性。全部通过时应看到 6 个场景均为 `4/4 PASS`，并生成被 `.gitignore` 排除的 `apps/api/eval-results.json`。
+
+### 12.4 Web 检查
+
+```powershell
+Set-Location 'D:\LLM Files\files\agentgate-control-plane\apps\web'
+
 npm.cmd run lint
 npm.cmd run typecheck
 npm.cmd test -- --run
 npm.cmd run build
-npx playwright install chromium
+```
+
+### 12.5 浏览器 E2E
+
+首次使用先安装 Chromium：
+
+```powershell
+Set-Location 'D:\LLM Files\files\agentgate-control-plane\apps\web'
+npx.cmd playwright install chromium
 $env:AGENTGATE_E2E_PYTHON = "..\api\.venv\Scripts\python.exe"
 npm.cmd run test:e2e
 ```
 
-The deterministic evaluator covers exactly six cases and reports four graders per case: outcome, trajectory, policy compliance and idempotency. The local acceptance run reports `6 cases × 4/4 PASS`; the command writes the ignored `apps/api/eval-results.json` machine-readable report.
+E2E 流程会验证登录、任务队列、审批和拒绝分支。它需要能够启动测试 API，并可能使用独立测试端口，不要把 E2E 测试数据库当作正式本地数据。
 
-## Project structure
+### 12.6 一键验证脚本
 
-```text
-apps/api/       FastAPI app, PostgreSQL migrations, durable queue, tools, policy, runner
-apps/web/       React/Vite control console and Playwright flow
-docs/           architecture and deterministic demo script
-scripts/        local Compose start, migration, setup and verification commands
-compose.yaml    PostgreSQL + API + scheduler + control-worker + Web packaging
+```powershell
+Set-Location 'D:\LLM Files\files\agentgate-control-plane'
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify.ps1
 ```
 
-## Phase 0 boundary
+该脚本包含 API、eval、Web、构建和 E2E 检查。若当前机器缺少 API 虚拟环境、Node 依赖、Docker 或 Playwright 浏览器，应先按前面的准备步骤处理，再重新运行。
 
-Phase 0 的 Compose 可靠底座只执行只读检查、认证、持久化队列、迁移和 `platform.self_check` 原生 Worker self-check；API 不直接操作 Windows 宿主机，且不存在真实服务重启、任意 Shell、任意 PowerShell、文件写入或密钥操作。高权限能力只预留给后续原生 Windows Worker 阶段。
+## 十三、常见问题
 
-## Tradeoffs and limitations
+### 13.1 浏览器显示 `ERR_CONNECTION_REFUSED`
 
-当前实现使用单用户认证、PostgreSQL/Alembic、持久化 Outbox、控制 Worker、原生 Worker 协议和 deterministic mock provider；没有真实基础设施 handler。模型提供方可选，禁用模型时控制平面仍可启动。
+原因通常是 API/Web 没有启动，或端口与浏览器访问地址不一致。
 
-## Demo walkthrough
+```powershell
+docker compose ps
+Invoke-RestMethod http://127.0.0.1:8000/health
+```
 
-Follow the [3–5 minute demo script](docs/demo.md) for the policy page, degraded-service approval, denied key rotation, audit filters and eval report.
+重新启动：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-local.ps1 -Provider mock
+```
+
+### 13.2 PowerShell 报 npm.ps1 被禁止运行
+
+使用：
+
+```powershell
+npm.cmd ci
+npm.cmd test -- --run
+npm.cmd run build
+```
+
+### 13.3 登录失败
+
+先判断页面状态：
+
+- 显示“初始化管理员密码”：需要 bootstrap token 和新密码。
+- 显示“登录”：只需要已经设置的管理员密码。
+- 初始化成功后，bootstrap token 会失效，不要继续用它登录。
+- 确认浏览器使用的是同一个地址，例如始终使用 `127.0.0.1`，不要在 `localhost` 和 `127.0.0.1` 之间切换。
+
+当前没有密码重置页面。不要直接删除 `data/` 或 PostgreSQL 卷，除非你明确要丢弃本地账号和运行记录。
+
+### 13.4 API 测试提示虚拟环境不存在
+
+检查文件：
+
+```powershell
+Test-Path .\apps\api\.venv\Scripts\python.exe
+```
+
+不存在时重新创建：
+
+```powershell
+py -3.11 -m venv .\apps\api\.venv
+& .\apps\api\.venv\Scripts\python.exe -m pip install -e ".\apps\api[dev]"
+```
+
+注意 API 和 Worker 使用两个不同的虚拟环境：
+
+```text
+apps/api/.venv
+apps/worker/.venv
+```
+
+### 13.5 模型服务请求失败
+
+先切回 mock，确认控制平面本身正常：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-local.ps1 -Provider mock
+```
+
+如果 mock 正常，再检查：
+
+- provider 是否设置为 `openai_compatible`。
+- Base URL 是否是服务商要求的兼容地址。
+- model 名称是否正确。
+- key 是否有效且只存在于后端 `.env`。
+- 服务是否支持 Chat Completions 和 tools/tool calling。
+
+### 13.6 迁移或 Compose 服务失败
+
+查看服务日志：
+
+```powershell
+docker compose logs --tail 100 postgres migrate api control-worker scheduler web
+```
+
+确认 PostgreSQL 健康后手动迁移：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\migrate-local.ps1
+```
+
+## 十四、项目目录说明
+
+```text
+agentgate-control-plane/
+├─ apps/
+│  ├─ api/
+│  │  ├─ app/api/          FastAPI 路由、认证、运行、策略、审计和 Worker API
+│  │  ├─ app/auth/         管理员会话、CSRF、client token 和 Worker 认证
+│  │  ├─ app/control/      持久化控制任务、租约和队列模型
+│  │  ├─ app/evals/        确定性评测器
+│  │  ├─ app/llm/          mock 和 OpenAI-compatible 模型适配器
+│  │  ├─ app/processes/    scheduler 与 control-worker
+│  │  ├─ app/services/     AgentRunner、审批、执行器、审计和事件流
+│  │  ├─ app/tools/        工具定义、参数模型、登记表和处理器
+│  │  ├─ migrations/       Alembic 数据库迁移
+│  │  └─ tests/            API、策略、队列、认证和安全测试
+│  ├─ web/
+│  │  ├─ src/api/          浏览器 API 客户端
+│  │  ├─ src/auth/         登录和会话状态
+│  │  ├─ src/components/   页面组件和时间线
+│  │  ├─ src/i18n/         中文界面文案和格式化函数
+│  │  ├─ src/pages/        运行、策略、审计和登录页面
+│  │  ├─ src/styles.css    控制台样式
+│  │  ├─ src/**/*.test.*   Web 单元测试
+│  │  └─ e2e/              Playwright 浏览器测试
+│  └─ worker/               Windows 原生 Worker 协议实现和测试
+├─ docs/
+│  ├─ architecture.md      架构、状态机、审批顺序和事务边界
+│  ├─ demo.md               本地演示脚本
+│  ├─ assets/               截图和文档资源
+│  └─ superpowers/          规格、计划、报告和进度记录
+├─ scripts/
+│  ├─ setup-local.ps1       首次准备 Worker/Web 依赖并启动 mock
+│  ├─ start-local.ps1       启动 PostgreSQL、迁移和 Compose 服务
+│  ├─ stop-local.ps1        停止本地服务
+│  ├─ migrate-local.ps1     执行 Alembic 迁移
+│  ├─ start-worker.ps1      启动本机原生 Worker
+│  ├─ verify-foundation.ps1 验证迁移、队列、heartbeat 和 Worker 自检
+│  └─ verify.ps1            执行 API、Web、构建和 E2E 验收
+├─ compose.yaml              本地 PostgreSQL、API、Worker 和 Web 编排
+├─ .env.example              后端环境变量模板
+├─ .gitignore                本地密钥、缓存、虚拟环境和生成物规则
+└─ README.md                 项目使用手册
+```
+
+更细的文件职责、修改边界和文档索引见 [docs/README.md](docs/README.md)。
+
+## 十五、安全要求
+
+### 不要提交或发送以下内容
+
+- `.env`。
+- `data/bootstrap-token`。
+- 管理员密码。
+- `AGENTGATE_LLM_API_KEY`。
+- client token、Worker enrollment token 或 Worker token。
+- 包含敏感参数的完整审计导出。
+
+### 本地安全边界
+
+- Compose 只绑定 `127.0.0.1`。
+- PostgreSQL 不发布宿主机端口。
+- Worker 只接受 loopback API 地址。
+- 高风险和未知工具 fail-closed。
+- 工具参数使用严格 schema 校验。
+- 审批使用条件状态转换，重复点击不会重复执行。
+- 工具执行使用唯一幂等键。
+- 审计 payload 在存储和 API 返回边界都做脱敏。
+
+## 十六、后续路线
+
+当前建议按以下顺序演进：
+
+1. **Phase 0：本地安全演示**（当前）
+   - 完成登录、策略、审批、持久化队列、审计和 mock 流程。
+   - 只允许安全的本地自检协议。
+
+2. **Phase 1：真实本机 Worker**
+   - 在显式白名单中接入有限的 Windows 服务检查和重启。
+   - 为每种高权限动作增加 capability、目标约束、超时和回滚策略。
+   - 继续禁止任意 Shell 和任意路径操作。
+
+3. **Phase 2：外部 Agent 统一接入**
+   - 把外部 action proposal 接入持久化审批队列。
+   - 增加 client token 管理界面、scope 管理、过期和轮换。
+   - 提供稳定的事件、检查、动作和结果 API 版本。
+
+4. **Phase 3：多用户和生产治理**
+   - 增加多用户、角色、组织隔离和更细的审批权限。
+   - 增加密钥管理系统、集中日志、监控、告警和备份恢复。
+   - 在真实基础设施执行前完成威胁建模和独立安全评审。
+
+在扩大真实执行能力之前，应先保持当前的 fail-closed、幂等、审批和审计原则。
+
+## 相关文档
+
+- [项目文件导航](docs/README.md)
+- [系统架构](docs/architecture.md)
+- [本地演示脚本](docs/demo.md)
+- [项目规格和实施计划](docs/superpowers/)

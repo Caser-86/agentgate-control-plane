@@ -31,8 +31,8 @@ describe("ApprovalCard", () => {
 
     render(<ApprovalCard action={action} onApprove={onApprove} onDeny={vi.fn()} />);
     expect(screen.getByText("restart_service")).toBeInTheDocument();
-    expect(screen.getByText("Medium risk")).toBeInTheDocument();
-    expect(screen.getByText(/explicit human approval/)).toBeInTheDocument();
+    expect(screen.getAllByText("中风险")).not.toHaveLength(0);
+    expect(screen.getByText(/等待明确的人工作出批准/)).toBeInTheDocument();
     expect(screen.getByText("payments-api", { selector: "strong" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "批准" }));
@@ -56,7 +56,7 @@ describe("ApprovalCard", () => {
     );
     await user.click(screen.getByRole("button", { name: "批准" }));
 
-    expect(await screen.findByText("该操作已完成决定")).toBeInTheDocument();
+    expect(await screen.findByText("该操作已经处理过")).toBeInTheDocument();
     expect(onRefresh).toHaveBeenCalledOnce();
   });
 

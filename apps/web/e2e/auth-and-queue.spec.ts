@@ -71,7 +71,7 @@ test("中文首次登录、排队审批拒绝并在刷新后保留审计游标",
   await expect(page.locator('[data-testid="run-status"]').first()).toBeVisible();
   await expect.poll(() => hasRecordedRunStatus(page, createdRun.id, "running"), { timeout: 15_000, intervals: [100, 250, 500] }).toBe(true);
   await page.reload();
-  await expect(page.getByTestId("run-status")).toContainText("Waiting approval");
+  await expect(page.getByTestId("run-status")).toContainText("等待审批");
   await expect(page.getByTestId("approval-card")).toBeVisible({ timeout: 15_000 });
   await expect(page.getByTestId("approval-card")).toContainText("需要人工审批");
 

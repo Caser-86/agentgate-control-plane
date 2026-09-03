@@ -4,15 +4,12 @@ import { api } from "../api/client";
 import type { AgentRun } from "../types";
 import { EmptyState } from "../components/EmptyState";
 import { StatusBadge } from "../components/StatusBadge";
+import { formatDateTime } from "../i18n/zh-CN";
 
 const examples = [
-  "Investigate payments-api and restore it safely. Do not rotate credentials.",
-  "Rotate the API key for payments-api.",
+  { label: "恢复降级服务 → 需审批", prompt: "检查 payments-api 并安全恢复，不要轮换凭据。" },
+  { label: "轮换 API 密钥 → 直接拒绝", prompt: "请轮换 payments-api 的 API 密钥。" },
 ];
-
-function formatTime(value: string): string {
-  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
-}
 
 export function RunsPage() {
   const navigate = useNavigate();
@@ -30,7 +27,7 @@ export function RunsPage() {
         ...current,
         ...loaded.filter((run) => !current.some((existing) => existing.id === run.id)),
       ]);
-    }).catch(() => { if (active) setError("Runs could not be loaded."); }).finally(() => { if (active) setLoading(false); });
+    }).catch(() => { if (active) setError("无法加载运行记录。"); }).finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, []);
 
@@ -45,7 +42,7 @@ export function RunsPage() {
       setPrompt("");
       navigate(`/runs/${run.id}`);
     } catch {
-      setError("The run could not be started.");
+      setError("无法启动运行。");
     } finally {
       setSubmitting(false);
     }
@@ -54,21 +51,21 @@ export function RunsPage() {
   return (
     <div className="page-shell">
       <div className="page-heading">
-        <div><span className="eyebrow">01 / 操作</span><h1>运行</h1><p>在意图成为外部操作前先观察它。</p></div>
-        <div className="heading-stat"><strong>{runs.length.toString().padStart(2, "0")}</strong><span>tracked runs</span></div>
+        <div><span className="eyebrow">01 / 操作</span><h1>运行</h1><p>在 Agent 意图变成外部动作前，先看清它要做什么。</p></div>
+        <div className="heading-stat"><strong>{runs.length.toString().padStart(2, "0")}</strong><span>条运行记录</span></div>
       </div>
       <section className="composer panel">
-        <div className="section-heading"><div><span className="eyebrow">新建控制运行</span><h2>希望 Agent 调查什么？</h2></div><span className="mono-note">mock / deterministic</span></div>
+        <div className="section-heading"><div><span className="eyebrow">新建控制运行</span><h2>你希望 Agent 调查什么？</h2></div><span className="mono-note">mock / 确定性</span></div>
         <form onSubmit={submit}>
           <label htmlFor="task-request">任务请求</label>
-          <textarea id="task-request" data-testid="run-request" value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="描述操作目标和安全边界…" rows={3} />
-          <div className="composer-footer"><div className="example-chips" aria-label="示例">{examples.map((example) => <button type="button" key={example} onClick={() => setPrompt(example)}>{example.startsWith("Rotate") ? "轮换密钥 → 拒绝" : "恢复降级 API → 批准"}</button>)}</div><button className="button button-primary" data-testid="start-run" type="submit" disabled={submitting || prompt.trim().length < 5}>{submitting ? "启动中…" : "开始运行"}<span aria-hidden="true">↗</span></button></div>
+          <textarea id="task-request" name="task-request" data-testid="run-request" value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="描述操作目标，以及允许的安全边界…" rows={3} />
+          <div className="composer-footer"><div className="example-chips" aria-label="演示示例">{examples.map((example) => <button type="button" key={example.prompt} onClick={() => setPrompt(example.prompt)}>{example.label}</button>)}</div><button className="button button-primary" data-testid="start-run" type="submit" disabled={submitting || prompt.trim().length < 5}>{submitting ? "正在启动…" : "启动运行"}<span aria-hidden="true">↗</span></button></div>
         </form>
       </section>
       {error && <p className="inline-error" role="alert">{error}</p>}
       <section className="runs-section panel">
-        <div className="section-heading"><div><span className="eyebrow">活动账本</span><h2>最近运行</h2></div><span className="mono-note">newest first</span></div>
-        {loading ? <div className="loading-row">Loading run history…</div> : runs.length === 0 ? <EmptyState title="No runs in the ledger" description="Start with one of the deterministic demos above to see policy and approval events appear." /> : <div className="table-wrap"><table><thead><tr><th>Run</th><th>Request</th><th>Status</th><th>Provider</th><th>Steps</th><th>Updated</th></tr></thead><tbody>{runs.map((run) => <tr key={run.id}><td><Link className="run-link" to={`/runs/${run.id}`}>#{run.id.slice(0, 8)}</Link></td><td className="request-cell">{run.user_request}</td><td data-testid="run-status"><StatusBadge value={run.status} /></td><td><code>{run.provider}</code></td><td>{run.step_count.toString().padStart(2, "0")}</td><td className="muted-cell">{formatTime(run.updated_at)}</td></tr>)}</tbody></table></div>}
+        <div className="section-heading"><div><span className="eyebrow">活动记录</span><h2>最近运行</h2></div><span className="mono-note">按时间倒序</span></div>
+        {loading ? <div className="loading-row" aria-live="polite">正在加载运行记录…</div> : runs.length === 0 ? <EmptyState title="暂无运行记录" description="从上面的确定性演示开始，查看策略和审批事件。" /> : <div className="table-wrap"><table><thead><tr><th>运行</th><th>请求</th><th>状态</th><th>模型提供方</th><th>步骤</th><th>更新时间</th></tr></thead><tbody>{runs.map((run) => <tr key={run.id}><td><Link className="run-link" to={`/runs/${run.id}`} translate="no">#{run.id.slice(0, 8)}</Link></td><td className="request-cell">{run.user_request}</td><td data-testid="run-status"><StatusBadge value={run.status} /></td><td><code translate="no">{run.provider}</code></td><td>{run.step_count.toString().padStart(2, "0")}</td><td className="muted-cell">{formatDateTime(run.updated_at)}</td></tr>)}</tbody></table></div>}
       </section>
     </div>
   );

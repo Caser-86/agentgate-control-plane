@@ -1,16 +1,16 @@
 # 阶段 0：可靠底座实施计划
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox ('- [ ]') syntax for tracking.
+> **针对智能体 Worker：** 必须使用 `superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans`，按任务逐项执行本计划。步骤使用复选框（`- [ ]`）语法跟踪。
 
-**Goal:** 将当前演示从 SQLite、请求内后台任务和进程内事件代理，升级为可在单台 Windows 主机上恢复运行的 PostgreSQL + 持久化队列 + 认证控制平面，并提供原生 Worker 协议骨架。
+**目标：** 将当前演示从 SQLite、请求内后台任务和进程内事件代理，升级为可在单台 Windows 主机上恢复运行的 PostgreSQL + 持久化队列 + 认证控制平面，并提供原生 Worker 协议骨架。
 
-**Architecture:** 保留现有 FastAPI/React 技术栈，将 API 变为只负责认证、状态和任务编排的控制平面；PostgreSQL 保存所有领域状态、租约和 Outbox；独立的控制 Worker 处理 AgentRun 等容器内任务；原生 Windows Worker 只负责后续需要宿主机权限的受限连接器。本阶段不增加真实服务重启、文件写入或任意脚本能力。
+**架构：** 保留现有 FastAPI/React 技术栈，将 API 变为只负责认证、状态和任务编排的控制平面；PostgreSQL 保存所有领域状态、租约和 Outbox；独立的控制 Worker 处理 AgentRun 等容器内任务；原生 Windows Worker 只负责后续需要宿主机权限的受限连接器。本阶段不增加真实服务重启、文件写入或任意脚本能力。
 
-**Tech Stack:** Python 3.11、FastAPI、SQLModel/SQLAlchemy、Alembic、psycopg 3、PostgreSQL、React/Vite、TypeScript、pytest、Ruff、mypy、Playwright、Windows DPAPI/pywin32。
+**技术栈：** Python 3.11、FastAPI、SQLModel/SQLAlchemy、Alembic、psycopg 3、PostgreSQL、React/Vite、TypeScript、pytest、Ruff、mypy、Playwright、Windows DPAPI/pywin32。
 
-**Spec:** [docs/superpowers/specs/2026-08-31-agentgate-local-governance-platform-design.md](../specs/2026-08-31-agentgate-local-governance-platform-design.md)
+**规格：** [docs/superpowers/specs/2026-08-31-agentgate-local-governance-platform-design.md](../specs/2026-08-31-agentgate-local-governance-platform-design.md)
 
-## Global Constraints
+## 全局约束
 
 - 适用范围：单台 Windows 主机、单用户、仅本机访问。
 - Docker Compose 运行 web、api、scheduler、postgres；高权限能力只放在原生 Windows Worker。
@@ -32,58 +32,58 @@
 
 ### 数据库与配置
 
-- Modify: apps/api/pyproject.toml — 增加 Alembic、PostgreSQL 驱动、认证和 Windows Worker 依赖。
-- Modify: apps/api/app/config.py — 数据库、认证、租约、Outbox 和本机网络配置。
-- Modify: apps/api/app/db.py — engine/session 工厂和迁移检查，不再负责生产建表。
-- Modify: apps/api/app/main.py — 启动检查、认证中间件、路由和 CORS。
-- Modify: apps/api/Dockerfile — 迁移/服务启动边界和非 root 运行。
-- Modify: compose.yaml — PostgreSQL、控制 Worker、健康检查和 localhost 端口。
-- Create: apps/api/alembic.ini、apps/api/migrations/env.py、apps/api/migrations/script.py.mako、apps/api/migrations/versions/0001_legacy_schema.py。
+- 修改：apps/api/pyproject.toml — 增加 Alembic、PostgreSQL 驱动、认证和 Windows Worker 依赖。
+- 修改：apps/api/app/config.py — 数据库、认证、租约、Outbox 和本机网络配置。
+- 修改：apps/api/app/db.py — engine/session 工厂和迁移检查，不再负责生产建表。
+- 修改：apps/api/app/main.py — 启动检查、认证中间件、路由和 CORS。
+- 修改：apps/api/Dockerfile — 迁移/服务启动边界和非 root 运行。
+- 修改：compose.yaml — PostgreSQL、控制 Worker、健康检查和 localhost 端口。
+- 新建：apps/api/alembic.ini、apps/api/migrations/env.py、apps/api/migrations/script.py.mako、apps/api/migrations/versions/0001_legacy_schema.py。
 
 ### 控制平面领域和可靠队列
 
-- Modify: apps/api/app/models.py — 兼容现有 Run/Action/Audit 模型并注册新模型。
-- Create: apps/api/app/control/__init__.py、apps/api/app/control/enums.py、apps/api/app/control/models.py、apps/api/app/control/repositories.py、apps/api/app/control/service.py。
-- Modify: apps/api/app/repositories.py — 仅保留旧演示兼容仓储，并复用新事务接口。
+- 修改：apps/api/app/models.py — 兼容现有 Run/Action/Audit 模型并注册新模型。
+- 新建：apps/api/app/control/__init__.py、apps/api/app/control/enums.py、apps/api/app/control/models.py、apps/api/app/control/repositories.py、apps/api/app/control/service.py。
+- 修改：apps/api/app/repositories.py — 仅保留旧演示兼容仓储，并复用新事务接口。
 
 ### 认证与 API
 
-- Create: apps/api/app/auth/models.py、apps/api/app/auth/security.py、apps/api/app/auth/dependencies.py。
-- Create: apps/api/app/api/auth.py、apps/api/app/api/worker.py、apps/api/app/api/v1.py。
-- Modify: apps/api/app/schemas.py、apps/api/app/api/runs.py、apps/api/app/api/approvals.py。
-- Create: apps/api/app/processes/control_worker.py — 独立进程执行持久化控制任务。
-- Modify: apps/api/app/services/runs.py、apps/api/app/services/approvals.py、apps/api/app/services/events.py。
+- 新建：apps/api/app/auth/models.py、apps/api/app/auth/security.py、apps/api/app/auth/dependencies.py。
+- 新建：apps/api/app/api/auth.py、apps/api/app/api/worker.py、apps/api/app/api/v1.py。
+- 修改：apps/api/app/schemas.py、apps/api/app/api/runs.py、apps/api/app/api/approvals.py。
+- 新建：apps/api/app/processes/control_worker.py — 独立进程执行持久化控制任务。
+- 修改：apps/api/app/services/runs.py、apps/api/app/services/approvals.py、apps/api/app/services/events.py。
 
 ### 原生 Worker
 
-- Create: apps/worker/pyproject.toml、apps/worker/agentgate_worker/__init__.py、apps/worker/agentgate_worker/client.py、apps/worker/agentgate_worker/journal.py、apps/worker/agentgate_worker/vault.py、apps/worker/agentgate_worker/main.py。
-- Create: apps/worker/tests/test_client.py、apps/worker/tests/test_journal.py、apps/worker/tests/test_vault.py。
+- 新建：apps/worker/pyproject.toml、apps/worker/agentgate_worker/__init__.py、apps/worker/agentgate_worker/client.py、apps/worker/agentgate_worker/journal.py、apps/worker/agentgate_worker/vault.py、apps/worker/agentgate_worker/main.py。
+- 新建：apps/worker/tests/test_client.py、apps/worker/tests/test_journal.py、apps/worker/tests/test_vault.py。
 - 阶段 0 只提供控制协议、心跳、租约和安全自检能力；Windows 服务安装器和真实连接器在阶段 3/4 实现。
 
 ### 前端与测试
 
-- Create: apps/web/src/auth/AuthProvider.tsx、apps/web/src/pages/LoginPage.tsx。
-- Modify: apps/web/src/api/client.ts、apps/web/src/App.tsx、apps/web/src/hooks/useRunEvents.ts。
-- Create: apps/web/src/auth/AuthProvider.test.tsx、apps/web/src/pages/LoginPage.test.tsx、apps/web/e2e/auth-and-queue.spec.ts。
-- Create/Modify: apps/api/tests/test_migrations.py、test_control_queue.py、test_auth_api.py、test_worker_protocol.py、test_outbox.py、test_durable_runs.py、test_security_regressions.py。
-- Modify: README.md、docs/architecture.md、scripts/start-local.ps1、scripts/stop-local.ps1；新增 scripts/migrate-local.ps1、scripts/setup-local.ps1、scripts/verify-foundation.ps1。
+- 新建：apps/web/src/auth/AuthProvider.tsx、apps/web/src/pages/LoginPage.tsx。
+- 修改：apps/web/src/api/client.ts、apps/web/src/App.tsx、apps/web/src/hooks/useRunEvents.ts。
+- 新建：apps/web/src/auth/AuthProvider.test.tsx、apps/web/src/pages/LoginPage.test.tsx、apps/web/e2e/auth-and-queue.spec.ts。
+- 新建/修改：apps/api/tests/test_migrations.py、test_control_queue.py、test_auth_api.py、test_worker_protocol.py、test_outbox.py、test_durable_runs.py、test_security_regressions.py。
+- 修改：README.md、docs/architecture.md、scripts/start-local.ps1、scripts/stop-local.ps1；新增 scripts/migrate-local.ps1、scripts/setup-local.ps1、scripts/verify-foundation.ps1。
 
 ---
 
-### Task 0: 记录现有基线并保护工作区
+### 任务 0：记录现有基线并保护工作区
 
-**Files:**
+**文件：**
 
-- No file changes.
-- Read only: current Git status, existing test configuration, and the approved spec.
+- 不修改文件。
+- 只读检查：当前 Git 状态、现有测试配置和已批准的规格。
 
-**Interfaces:**
+**接口：**
 
-- Produces: baseline test commands and a clean list of unrelated user changes for later verification.
+- 输出：基线测试命令，以及供后续验证使用的、与本计划无关的用户改动清单。
 
-- [ ] **Step 1: Record the current worktree state**
+- [ ] **步骤 1：记录当前工作区状态**
 
-Run:
+运行：
 
 ~~~powershell
 git status --short
@@ -91,11 +91,11 @@ git diff --stat
 git log -1 --oneline
 ~~~
 
-Expected: the existing modified frontend/backend files are listed; do not reset, stash, checkout, or delete them.
+预期：列出已有的前端/后端改动文件；不要重置、暂存、检出或删除这些文件。
 
-- [ ] **Step 2: Run the backend baseline**
+- [ ] **步骤 2：运行后端基线测试**
 
-Run:
+运行：
 
 ~~~powershell
 Set-Location apps/api
@@ -104,11 +104,11 @@ Set-Location apps/api
 .\.venv\Scripts\python.exe -m mypy app
 ~~~
 
-Expected: record pass/fail counts. If a baseline failure is caused by an existing user change, keep it documented and do not “fix” unrelated files in this plan.
+预期：记录通过/失败数量。如果基线失败由已有用户改动导致，应保留记录，不要在本计划中“修复”无关文件。
 
-- [ ] **Step 3: Run the frontend baseline with the Windows-safe npm executable**
+- [ ] **步骤 3：使用 Windows 安全的 npm 可执行文件运行前端基线测试**
 
-Run:
+运行：
 
 ~~~powershell
 Set-Location ..\web
@@ -118,39 +118,39 @@ npm.cmd test -- --run
 npm.cmd run build
 ~~~
 
-Expected: record pass/fail counts and keep the prior PowerShell npm.ps1 execution-policy workaround out of the product implementation.
+预期：记录通过/失败数量，并将之前针对 PowerShell npm.ps1 执行策略的规避方式限定在开发命令层面，不带入产品实现。
 
-- [ ] **Step 4: Commit no code and preserve the baseline report**
+- [ ] **步骤 4：不提交代码并保留基线记录**
 
-Do not create a generated report in the repository. Put the observed baseline in the implementation task notes and verify at the end that the pre-existing git status entries remain unchanged except for planned files.
+不要在仓库中创建生成性报告。将观察到的基线写入实现任务记录，并在最后确认：除计划文件外，预先存在的 git status 条目保持不变。
 
 ---
 
-### Task 1: PostgreSQL、Alembic 和可验证启动
+### 任务 1：PostgreSQL、Alembic 和可验证启动
 
-**Files:**
+**文件：**
 
-- Modify: apps/api/pyproject.toml
-- Modify: apps/api/app/config.py
-- Modify: apps/api/app/db.py
-- Modify: apps/api/app/main.py
-- Modify: apps/api/Dockerfile
-- Modify: compose.yaml
-- Create: apps/api/alembic.ini
-- Create: apps/api/migrations/env.py
-- Create: apps/api/migrations/script.py.mako
-- Create: apps/api/migrations/versions/0001_legacy_schema.py
-- Test: apps/api/tests/test_database_config.py
-- Test: apps/api/tests/test_migrations.py
+- 修改：apps/api/pyproject.toml
+- 修改：apps/api/app/config.py
+- 修改：apps/api/app/db.py
+- 修改：apps/api/app/main.py
+- 修改：apps/api/Dockerfile
+- 修改：compose.yaml
+- 新建：apps/api/alembic.ini
+- 新建：apps/api/migrations/env.py
+- 新建：apps/api/migrations/script.py.mako
+- 新建：apps/api/migrations/versions/0001_legacy_schema.py
+- 测试：apps/api/tests/test_database_config.py
+- 测试：apps/api/tests/test_migrations.py
 
-**Interfaces:**
+**接口：**
 
-- Consumes: existing SQLModel tables agent_runs, tool_actions, audit_events, service_states.
-- Produces: create_db_engine(url: str) -> Engine, get_session() -> Generator[Session, None, None], and an Alembic database with a recorded head revision.
+- 输入：现有 SQLModel 表 agent_runs、tool_actions、audit_events、service_states。
+- 输出：create_db_engine(url: str) -> Engine、get_session() -> Generator[Session, None, None]，以及记录了 head revision 的 Alembic 数据库。
 
-- [ ] **Step 1: Add failing configuration and migration tests**
+- [ ] **步骤 1：新增失败的配置和迁移测试**
 
-Create tests with these assertions:
+创建测试并包含以下断言：
 
 ~~~python
 def test_postgres_url_is_the_compose_default(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -165,22 +165,22 @@ def test_migration_head_creates_legacy_tables(postgres_url: str) -> None:
     assert inspector.has_table("audit_events")
 ~~~
 
-The Postgres fixture must run against the Compose database or a disposable test database and must never use the production data volume.
+Postgres fixture 必须针对 Compose 数据库或一次性测试数据库运行，绝不能使用生产数据卷。
 
-- [ ] **Step 2: Run the focused tests to verify they fail for the old SQLite/create-all path**
+- [ ] **步骤 2：运行重点测试，确认旧的 SQLite/create-all 路径会失败**
 
-Run:
+运行：
 
 ~~~powershell
 Set-Location apps/api
 .\.venv\Scripts\python.exe -m pytest tests/test_database_config.py tests/test_migrations.py -q
 ~~~
 
-Expected: FAIL because the current settings default to SQLite and no Alembic environment exists.
+预期：FAIL，因为当前设置默认使用 SQLite，且不存在 Alembic 环境。
 
-- [ ] **Step 3: Add database dependencies and explicit settings**
+- [ ] **步骤 3：新增数据库依赖和显式设置**
 
-Add these dependency ranges to pyproject.toml:
+将以下依赖范围加入 pyproject.toml：
 
 ~~~toml
 "alembic>=1.15,<2",
@@ -188,7 +188,7 @@ Add these dependency ranges to pyproject.toml:
 "argon2-cffi>=23.1,<26",
 ~~~
 
-Add settings with these defaults:
+加入以下默认设置：
 
 ~~~python
 database_url: str = "postgresql+psycopg://agentgate:agentgate@postgres:5432/agentgate"
@@ -198,28 +198,28 @@ outbox_batch_size: int = 100
 auth_bootstrap_token_file: str = "/app/data/bootstrap-token"
 ~~~
 
-Keep a test-only SQLite engine factory for unit tests, but never select it through the production Compose default.
+保留仅供单元测试使用的 SQLite engine 工厂，但生产 Compose 默认配置绝不能选择它。
 
-- [ ] **Step 4: Create the baseline Alembic environment and migration**
+- [ ] **步骤 4：创建基础 Alembic 环境和迁移**
 
-migrations/env.py must import every SQLModel module present at the current task before reading SQLModel.metadata; Task 2 must extend that import list with the new control models. The baseline migration must create the four existing tables with their current columns, indexes, unique idempotency constraint and enum/string representations. Do not call SQLModel.metadata.create_all() from the API lifespan.
+migrations/env.py 必须在读取 SQLModel.metadata 之前导入当前任务已有的每个 SQLModel 模块；任务 2 必须将新的控制模型加入该导入列表。基础迁移必须按照当前列、索引、唯一幂等约束以及枚举/字符串表示创建现有四张表。不要在 API lifespan 中调用 SQLModel.metadata.create_all()。
 
-Expose a small helper used by tests and startup checks:
+暴露一个供测试和启动检查使用的小型辅助函数：
 
 ~~~python
 def upgrade_to_head(database_url: str) -> None:
     """Run Alembic upgrade head for an explicit database URL."""
 ~~~
 
-- [ ] **Step 5: Make startup fail clearly when migrations are missing**
+- [ ] **步骤 5：在缺少迁移时让启动明确失败**
 
-Change app.main.lifespan to verify the migration head before seeding any demo-only state. seed_demo_state() must run only when AGENTGATE_ENV=development and AGENTGATE_SEED_DEMO=true; production-like Compose startup must not recreate demo rows.
+修改 app.main.lifespan：在写入任何仅供演示的状态之前验证 migration head。seed_demo_state() 只能在 AGENTGATE_ENV=development 且 AGENTGATE_SEED_DEMO=true 时运行；类生产 Compose 启动不得重新创建演示数据行。
 
-Use an API startup error with code database_schema_not_ready when the revision is missing. Keep the existing non-root Docker user and add a Compose postgres service with a healthcheck, a named data volume, and no published host port.
+迁移 revision 缺失时，使用 code 为 database_schema_not_ready 的 API 启动错误。保留现有的非 root Docker 用户，并新增带 healthcheck 的 Compose postgres 服务和命名数据卷，不发布宿主机端口。
 
-- [ ] **Step 6: Run focused tests and static checks**
+- [ ] **步骤 6：运行重点测试和静态检查**
 
-Run:
+运行：
 
 ~~~powershell
 Set-Location apps/api
@@ -228,7 +228,7 @@ Set-Location apps/api
 .\.venv\Scripts\python.exe -m mypy app
 ~~~
 
-Expected: PASS. Commit:
+预期：PASS。提交：
 
 ~~~powershell
 git add apps/api/pyproject.toml apps/api/app/config.py apps/api/app/db.py apps/api/app/main.py apps/api/Dockerfile compose.yaml apps/api/alembic.ini apps/api/migrations apps/api/tests/test_database_config.py apps/api/tests/test_migrations.py
@@ -237,27 +237,27 @@ git commit -m "feat: add postgres migrations and startup checks"
 
 ---
 
-### Task 2: 持久化任务、租约、Outbox 和通用审计实体
+### 任务 2：持久化任务、租约、Outbox 和通用审计实体
 
-**Files:**
+**文件：**
 
-- Modify: apps/api/app/models.py
-- Create: apps/api/app/control/__init__.py
-- Create: apps/api/app/control/enums.py
-- Create: apps/api/app/control/models.py
-- Create: apps/api/app/control/repositories.py
-- Create: apps/api/app/control/service.py
-- Modify: apps/api/app/repositories.py
-- Modify: apps/api/app/services/audit.py
-- Create: apps/api/migrations/versions/0002_control_plane_tables.py
-- Test: apps/api/tests/test_control_queue.py
-- Test: apps/api/tests/test_outbox.py
-- Test: apps/api/tests/test_control_audit.py
+- 修改：apps/api/app/models.py
+- 新建：apps/api/app/control/__init__.py
+- 新建：apps/api/app/control/enums.py
+- 新建：apps/api/app/control/models.py
+- 新建：apps/api/app/control/repositories.py
+- 新建：apps/api/app/control/service.py
+- 修改：apps/api/app/repositories.py
+- 修改：apps/api/app/services/audit.py
+- 新建：apps/api/migrations/versions/0002_control_plane_tables.py
+- 测试：apps/api/tests/test_control_queue.py
+- 测试：apps/api/tests/test_outbox.py
+- 测试：apps/api/tests/test_control_audit.py
 
-**Interfaces:**
+**接口：**
 
-- Consumes: SQLAlchemy session factory and migration head from Task 1.
-- Produces these stable operations for later tasks:
+- 输入：SQLAlchemy session 工厂和任务 1 的 migration head。
+- 为后续任务输出以下稳定操作：
 
 ~~~python
 def enqueue_task(
@@ -305,9 +305,9 @@ def append_outbox_event(
 ) -> OutboxEvent
 ~~~
 
-- [ ] **Step 1: Write failing state and concurrency tests**
+- [ ] **步骤 1：编写失败的状态和并发测试**
 
-Cover the following exact cases:
+覆盖以下精确场景：
 
 ~~~python
 def test_duplicate_idempotency_key_returns_one_task(session: Session) -> None:
@@ -330,38 +330,38 @@ def test_outbox_cursor_is_monotonic(session: Session) -> None:
     assert events[0].sequence > 0
 ~~~
 
-Also cover the generic audit path with an event that has no AgentRun: the persisted row must keep resource_type/resource_id, actor and a redacted payload while leaving legacy run_id nullable.
+同时覆盖不包含 AgentRun 的通用审计路径：持久化行必须保留 resource_type/resource_id、actor 和脱敏后的 payload，同时让旧版 run_id 保持可空。
 
-- [ ] **Step 2: Run the focused tests to verify the new interfaces are absent**
+- [ ] **步骤 2：运行重点测试，确认新接口尚不存在**
 
-Run:
+运行：
 
 ~~~powershell
 Set-Location apps/api
 .\.venv\Scripts\python.exe -m pytest tests/test_control_queue.py tests/test_outbox.py -q
 ~~~
 
-Expected: FAIL with missing control models/repositories.
+预期：FAIL，因为缺少控制模型/仓储。
 
-- [ ] **Step 3: Add the control-plane models and migrations**
+- [ ] **步骤 3：新增控制平面模型和迁移**
 
-Create ControlTask with fields: UUID id, TaskKind kind, TaskStatus status, JSON payload, capability, unique idempotency key, attempts, available time, lease owner, lease expiry, created/updated/started/completed timestamps, result JSON, error class and side-effect certainty.
+创建 ControlTask，字段包括：UUID id、TaskKind kind、TaskStatus status、JSON payload、capability、唯一幂等键、attempts、可用时间、租约所有者、租约到期时间、创建/更新/开始/完成时间戳、结果 JSON、错误类别和副作用确定性。
 
-Create WorkerRegistration with UUID id, name, version, capability JSON, token digest, status, last heartbeat, created/updated timestamps. Create OutboxEvent with a database-generated monotonic bigint sequence, resource fields, JSON payload, published timestamp and created timestamp.
+创建 WorkerRegistration，字段包括 UUID id、name、version、capability JSON、token digest、status、最近心跳、创建/更新时间戳。创建 OutboxEvent，包含由数据库生成的单调递增 bigint 序列、资源字段、JSON payload、发布时间戳和创建时间戳。
 
-Extend the audit representation so generic events can have nullable run_id, nullable action_id, resource_type and resource_id; existing legacy run records remain readable.
+扩展审计表示，使通用事件支持可空的 run_id、可空的 action_id、resource_type 和 resource_id；现有旧版运行记录仍必须可读。
 
-Add an AuditService method that accepts either a run/action context or a generic resource context, redacts the payload before persistence, appends one AuditEvent and one OutboxEvent in the caller's transaction, and never requires a fabricated AgentRun ID.
+为 AuditService 新增一个方法：接受运行/动作上下文或通用资源上下文，在持久化前脱敏 payload，在调用方事务中追加一条 AuditEvent 和一条 OutboxEvent，且绝不要求伪造 AgentRun ID。
 
-- [ ] **Step 4: Implement atomic queue transitions**
+- [ ] **步骤 4：实现原子队列状态转换**
 
-claim_next_task() must select only queued tasks with available_at <= now, or expired leased tasks whose kind is safe to retry. Use a PostgreSQL row lock/conditional update so two workers cannot claim the same task. complete_task() must require the current lease owner and transition only from running/leased.
+claim_next_task() 只能选择 available_at <= now 的 queued 任务，或选择类型允许安全重试且租约已过期的任务。使用 PostgreSQL 行锁/条件更新，确保两个 Worker 不能认领同一任务。complete_task() 必须要求当前租约所有者，且只能从 running/leased 状态转换。
 
-For an action with possible side effects, an expired lease transitions to manual_review, not back to queued. For read-only/control-plane tasks, an expired lease increments attempts and returns to queued with bounded backoff.
+对于可能产生副作用的动作，过期租约应转换为 manual_review，而不是回到 queued。对于只读/控制平面任务，过期租约应增加 attempts，并使用有界退避回到 queued。
 
-- [ ] **Step 5: Make business changes and Outbox events one transaction**
+- [ ] **步骤 5：让业务变更和 Outbox 事件处于同一事务**
 
-Add a service helper:
+新增一个服务辅助函数：
 
 ~~~python
 def commit_with_outbox(
@@ -375,11 +375,11 @@ def commit_with_outbox(
     """Commit the current domain mutation and its notification atomically."""
 ~~~
 
-No caller may publish a user-visible state event before this transaction commits.
+任何调用方都不得在该事务提交前发布用户可见的状态事件。
 
-- [ ] **Step 6: Run Postgres concurrency tests, static checks, and commit**
+- [ ] **步骤 6：运行 Postgres 并发测试、静态检查并提交**
 
-Run:
+运行：
 
 ~~~powershell
 Set-Location apps/api
@@ -388,7 +388,7 @@ Set-Location apps/api
 .\.venv\Scripts\python.exe -m mypy app
 ~~~
 
-Expected: PASS. Commit:
+预期：PASS。提交：
 
 ~~~powershell
 git add apps/api/app/models.py apps/api/app/control apps/api/app/repositories.py apps/api/migrations/versions/0002_control_plane_tables.py apps/api/tests/test_control_queue.py apps/api/tests/test_outbox.py
@@ -397,35 +397,35 @@ git commit -m "feat: add durable control task queue and outbox"
 
 ---
 
-### Task 3: 单用户认证、会话、CSRF 和适配器令牌
+### 任务 3：单用户认证、会话、CSRF 和适配器令牌
 
-**Files:**
+**文件：**
 
-- Create: apps/api/app/auth/models.py
-- Create: apps/api/app/auth/security.py
-- Create: apps/api/app/auth/dependencies.py
-- Create: apps/api/app/api/auth.py
-- Modify: apps/api/app/schemas.py
-- Modify: apps/api/app/main.py
-- Modify: apps/api/app/api/runs.py
-- Modify: apps/api/app/api/approvals.py
-- Modify: apps/api/app/api/audit.py
-- Modify: apps/api/app/api/policies.py
-- Create: apps/api/app/api/v1.py
-- Create: apps/api/migrations/versions/0003_auth_tables.py
-- Test: apps/api/tests/test_auth_api.py
-- Test: apps/api/tests/test_auth_dependencies.py
-- Test: apps/api/tests/test_v1_api.py
-- Create: apps/web/src/auth/AuthProvider.tsx
-- Create: apps/web/src/pages/LoginPage.tsx
-- Modify: apps/web/src/api/client.ts
-- Modify: apps/web/src/App.tsx
-- Create: apps/web/src/auth/AuthProvider.test.tsx
-- Create: apps/web/src/pages/LoginPage.test.tsx
+- 新建：apps/api/app/auth/models.py
+- 新建：apps/api/app/auth/security.py
+- 新建：apps/api/app/auth/dependencies.py
+- 新建：apps/api/app/api/auth.py
+- 修改：apps/api/app/schemas.py
+- 修改：apps/api/app/main.py
+- 修改：apps/api/app/api/runs.py
+- 修改：apps/api/app/api/approvals.py
+- 修改：apps/api/app/api/audit.py
+- 修改：apps/api/app/api/policies.py
+- 新建：apps/api/app/api/v1.py
+- 新建：apps/api/migrations/versions/0003_auth_tables.py
+- 测试：apps/api/tests/test_auth_api.py
+- 测试：apps/api/tests/test_auth_dependencies.py
+- 测试：apps/api/tests/test_v1_api.py
+- 新建：apps/web/src/auth/AuthProvider.tsx
+- 新建：apps/web/src/pages/LoginPage.tsx
+- 修改：apps/web/src/api/client.ts
+- 修改：apps/web/src/App.tsx
+- 新建：apps/web/src/auth/AuthProvider.test.tsx
+- 新建：apps/web/src/pages/LoginPage.test.tsx
 
-**Interfaces:**
+**接口：**
 
-- Produces backend endpoints:
+- 输出后端端点：
 
 ~~~text
 GET  /api/auth/status
@@ -437,13 +437,13 @@ POST /api/auth/tokens
 DELETE /api/auth/tokens/{token_id}
 ~~~
 
-- Produces dependencies require_operator(request) -> Operator and require_client_scope(scope) -> ClientIdentity.
-- External adapter tokens can propose events/checks/actions but cannot approve, register Worker or modify policies.
-- Produces protocol-neutral proposal endpoints POST /api/v1/events, POST /api/v1/checks and POST /api/v1/actions; these endpoints normalize input, apply the action registry and never accept a caller-supplied final decision.
+- 输出依赖函数 require_operator(request) -> Operator 和 require_client_scope(scope) -> ClientIdentity。
+- 外部适配器令牌可以提议 events/checks/actions，但不能审批、注册 Worker 或修改策略。
+- 输出与协议无关的提议端点 POST /api/v1/events、POST /api/v1/checks 和 POST /api/v1/actions；这些端点会规范化输入、应用动作注册表，且绝不接受调用方提供的最终决策。
 
-- [ ] **Step 1: Write failing backend authentication tests**
+- [ ] **步骤 1：编写失败的后端认证测试**
 
-Cover first-run setup, password hashing, cookie attributes, CSRF rejection, protected endpoints, logout invalidation and scoped token denial:
+覆盖首次运行初始化、密码哈希、Cookie 属性、CSRF 拒绝、受保护端点、退出登录失效和作用域令牌拒绝：
 
 ~~~python
 def test_setup_requires_bootstrap_token_and_creates_one_operator(client, bootstrap_token):
@@ -462,40 +462,40 @@ def test_propose_token_cannot_approve(client, propose_only_token):
     assert response.status_code == 403
 ~~~
 
-- [ ] **Step 2: Run auth tests to verify the unauthenticated current API is exposed**
+- [ ] **步骤 2：运行认证测试，确认当前 API 未认证暴露**
 
-Run:
+运行：
 
 ~~~powershell
 Set-Location apps/api
 .\.venv\Scripts\python.exe -m pytest tests/test_auth_api.py tests/test_auth_dependencies.py -q
 ~~~
 
-Expected: FAIL because no operator/session/token models or protected dependency exists.
+预期：FAIL，因为不存在 Operator/session/token 模型或受保护依赖。
 
-- [ ] **Step 3: Implement operator, opaque sessions and token hashes**
+- [ ] **步骤 3：实现 Operator、不可枚举会话和令牌哈希**
 
-Create Operator, WebSession and ClientToken tables. Store only Argon2id password hashes and SHA-256 token digests. Store opaque random session IDs in an HttpOnly, SameSite=Strict cookie with Secure=false only for localhost HTTP development; make the setting explicit rather than inferred from the request.
+创建 Operator、WebSession 和 ClientToken 表。只存储 Argon2id 密码哈希和 SHA-256 令牌摘要。在 HttpOnly、SameSite=Strict Cookie 中存储不可枚举的随机会话 ID；仅在 localhost HTTP 开发环境使用 Secure=false，并将该设置显式配置，而不是从请求推断。
 
-On first startup with no operator, create a random bootstrap token in auth_bootstrap_token_file. POST /api/auth/setup must atomically consume it and refuse a second setup. The setup endpoint must never return the bootstrap token.
+首次启动且不存在 Operator 时，在 auth_bootstrap_token_file 中创建随机引导令牌。POST /api/auth/setup 必须原子地消费该令牌，并拒绝第二次初始化。初始化端点绝不能返回引导令牌。
 
-- [ ] **Step 4: Enforce authentication, scope and CSRF at the API boundary**
+- [ ] **步骤 4：在 API 边界强制执行认证、作用域和 CSRF**
 
-Require an authenticated operator for browser reads and all state changes. Require a header token with an explicit scope for external adapters. Require a CSRF token for every cookie-authenticated POST, PUT, PATCH and DELETE; compare exact configured Origin and reject missing/mismatched Origin.
+浏览器读取和所有状态变更都必须要求已认证的 Operator。外部适配器必须使用带有显式作用域的请求头令牌。所有基于 Cookie 认证的 POST、PUT、PATCH 和 DELETE 都必须要求 CSRF 令牌；精确比较已配置的 Origin，并拒绝缺失或不匹配的 Origin。
 
-Derive actor from the authenticated identity. Ignore and remove the current request-body actor as an authorization source; it may be retained only as a rejected compatibility field during migration.
+从已认证身份推导 actor。忽略并移除当前请求体中的 actor，不得将其作为授权来源；迁移期间最多只能将其保留为被拒绝的兼容字段。
 
-- [ ] **Step 5: Add protocol-neutral v1 proposal endpoints**
+- [ ] **步骤 5：新增与协议无关的 v1 提议端点**
 
-Before wiring the frontend, add the protocol-neutral v1 endpoints. An event creates a durable observation/event record; a check creates a registered read-only task; an action validates the action type and target, then returns allow_auto, require_approval or deny from the policy engine. Unknown actions and malformed parameters return 403/422 without creating an executable task. Add test_v1_api.py cases for a valid proposal, an unknown action, an unregistered target and a propose-only token.
+在接入前端之前，先新增与协议无关的 v1 端点。event 创建持久化的观测/事件记录；check 创建已注册的只读任务；action 校验动作类型和目标，然后由策略引擎返回 allow_auto、require_approval 或 deny。未知动作和格式错误的参数返回 403/422，且不创建可执行任务。在 test_v1_api.py 中加入有效提议、未知动作、未注册目标和仅提议令牌的用例。
 
-- [ ] **Step 6: Add the Chinese login flow**
+- [ ] **步骤 6：新增中文登录流程**
 
-AuthProvider must fetch /api/auth/status, redirect unauthenticated users to LoginPage, retain the CSRF token in memory, and send it in X-CSRF-Token. LoginPage must show Chinese labels for bootstrap setup, login failure, expired session and retry. The API client must convert 401, 403, and validation errors into stable error codes without displaying raw secrets.
+AuthProvider 必须请求 /api/auth/status，将未认证用户重定向到 LoginPage，在内存中保留 CSRF 令牌，并通过 X-CSRF-Token 发送。LoginPage 必须为引导初始化、登录失败、会话过期和重试显示中文标签。API client 必须将 401、403 和校验错误转换为稳定错误码，不能显示原始敏感信息。
 
-- [ ] **Step 7: Run backend/frontend auth and v1 tests, then commit**
+- [ ] **步骤 7：运行后端/前端认证和 v1 测试，然后提交**
 
-Run:
+运行：
 
 ~~~powershell
 Set-Location apps/api
@@ -506,7 +506,7 @@ npm.cmd run typecheck
 npm.cmd run lint
 ~~~
 
-Expected: PASS. Commit:
+预期：PASS。提交：
 
 ~~~powershell
 git add apps/api/app/auth apps/api/app/api/auth.py apps/api/app/api/v1.py apps/api/app/schemas.py apps/api/app/main.py apps/api/app/api/runs.py apps/api/app/api/approvals.py apps/api/app/api/audit.py apps/api/app/api/policies.py apps/api/migrations/versions/0003_auth_tables.py apps/api/tests/test_auth_api.py apps/api/tests/test_auth_dependencies.py apps/api/tests/test_v1_api.py apps/web/src/auth apps/web/src/pages/LoginPage.tsx apps/web/src/api/client.ts apps/web/src/App.tsx
@@ -515,28 +515,28 @@ git commit -m "feat: add local operator authentication and csrf"
 
 ---
 
-### Task 4: 原生 Worker 注册、租约协议和本机执行日志
+### 任务 4：原生 Worker 注册、租约协议和本机执行日志
 
-**Files:**
+**文件：**
 
-- Create: apps/api/app/api/worker.py
-- Create: apps/api/app/services/worker_protocol.py
-- Modify: apps/api/app/main.py
-- Create: apps/api/migrations/versions/0004_worker_protocol.py
-- Create: apps/worker/pyproject.toml
-- Create: apps/worker/agentgate_worker/__init__.py
-- Create: apps/worker/agentgate_worker/client.py
-- Create: apps/worker/agentgate_worker/journal.py
-- Create: apps/worker/agentgate_worker/vault.py
-- Create: apps/worker/agentgate_worker/main.py
-- Create: apps/worker/tests/test_client.py
-- Create: apps/worker/tests/test_journal.py
-- Create: apps/worker/tests/test_vault.py
-- Test: apps/api/tests/test_worker_protocol.py
+- 新建：apps/api/app/api/worker.py
+- 新建：apps/api/app/services/worker_protocol.py
+- 修改：apps/api/app/main.py
+- 新建：apps/api/migrations/versions/0004_worker_protocol.py
+- 新建：apps/worker/pyproject.toml
+- 新建：apps/worker/agentgate_worker/__init__.py
+- 新建：apps/worker/agentgate_worker/client.py
+- 新建：apps/worker/agentgate_worker/journal.py
+- 新建：apps/worker/agentgate_worker/vault.py
+- 新建：apps/worker/agentgate_worker/main.py
+- 新建：apps/worker/tests/test_client.py
+- 新建：apps/worker/tests/test_journal.py
+- 新建：apps/worker/tests/test_vault.py
+- 测试：apps/api/tests/test_worker_protocol.py
 
-**Interfaces:**
+**接口：**
 
-- Produces API endpoints:
+- 输出 API 端点：
 
 ~~~text
 POST /api/v1/worker/register
@@ -547,7 +547,7 @@ POST /api/v1/worker/tasks/{task_id}/complete
 POST /api/v1/worker/tasks/{task_id}/report
 ~~~
 
-- Produces Worker methods:
+- 输出 Worker 方法：
 
 ~~~python
 register() -> WorkerIdentity
@@ -557,9 +557,9 @@ complete(grant: TaskGrant, result: dict[str, object]) -> None
 recover_pending_reports() -> int
 ~~~
 
-- [ ] **Step 1: Write failing protocol and journal tests**
+- [ ] **步骤 1：编写失败的协议和日志测试**
 
-Test registration, invalid token, capability filtering, lease owner checks, start authorization, result replay and local journal recovery:
+测试注册、无效令牌、能力过滤、租约所有者检查、启动授权、结果重放和本地日志恢复：
 
 ~~~python
 def test_worker_cannot_claim_without_registered_capability(api_client):
@@ -574,9 +574,9 @@ def test_journal_replays_result_after_api_disconnect(tmp_path):
     assert journal.pending_reports() == [(task_id, {"status": "succeeded"})]
 ~~~
 
-- [ ] **Step 2: Run focused tests to verify the protocol is missing**
+- [ ] **步骤 2：运行重点测试，确认协议尚不存在**
 
-Run:
+运行：
 
 ~~~powershell
 Set-Location apps/api
@@ -585,27 +585,27 @@ Set-Location ..\..\apps\worker
 ..\api\.venv\Scripts\python.exe -m pytest tests -q
 ~~~
 
-Expected: FAIL because no Worker routes, client, journal or vault exists.
+预期：FAIL，因为不存在 Worker 路由、client、journal 或 vault。
 
-- [ ] **Step 3: Implement registration and scoped Worker identity**
+- [ ] **步骤 3：实现注册和带作用域的 Worker 身份**
 
-Use the one-time enrollment token from Task 3. Store only its digest; after registration issue a distinct Worker token and show it once through the local setup command. Store Worker credentials in a DPAPI-protected file through win32crypt.CryptProtectData; unit-test the vault behind an injectable protector so non-Windows test runners can use a fake implementation.
+使用任务 3 生成的一次性注册令牌。只存储其摘要；注册后签发独立的 Worker 令牌，并通过本地初始化命令只显示一次。通过 win32crypt.CryptProtectData 将 Worker 凭据存储在 DPAPI 保护的文件中；为 vault 注入可替换的保护器，以便非 Windows 测试运行器使用伪实现进行单元测试。
 
-The API must bind Worker requests to the registered Worker ID, token digest, protocol version and capability set. Worker requests cannot approve actions, change policies or submit arbitrary target paths.
+API 必须将 Worker 请求绑定到已注册的 Worker ID、令牌摘要、协议版本和能力集合。Worker 请求不能审批动作、修改策略或提交任意目标路径。
 
-- [ ] **Step 4: Implement claim/start/heartbeat/complete transitions**
+- [ ] **步骤 4：实现 claim/start/heartbeat/complete 状态转换**
 
-claim calls claim_next_task() with the Worker capabilities. start must atomically transition the task and persist an execution grant containing task ID, request digest, Worker ID and expiry before a connector can run. complete must require the same Worker ID, task ID and digest.
+claim 使用 Worker 能力调用 claim_next_task()。connector 运行前，start 必须原子地转换任务状态，并持久化包含 task ID、request digest、Worker ID 和过期时间的执行授权。complete 必须要求相同的 Worker ID、task ID 和摘要。
 
-Implement the Worker local journal with SQLite from the Python standard library. It stores only task identity, request digest, status, timestamps and already-redacted bounded results. It does not store passwords, API keys, full file contents or arbitrary command strings.
+使用 Python 标准库中的 SQLite 实现 Worker 本地日志。日志只存储任务身份、request digest、状态、时间戳和已脱敏的有界结果。不存储密码、API key、完整文件内容或任意命令字符串。
 
-- [ ] **Step 5: Add a safe Worker self-check task**
+- [ ] **步骤 5：新增安全的 Worker self-check 任务**
 
-Register only worker.self_check in this phase. It returns Worker version, protocol version and declared capabilities; it does not invoke a shell, Windows service, Docker, filesystem mutation or network target. Use it to validate the full register → claim → start → complete → report flow.
+本阶段只注册 worker.self_check。它返回 Worker 版本、协议版本和声明的能力；不调用 Shell、Windows 服务、Docker，不修改文件系统，也不访问网络目标。使用它验证完整的 register → claim → start → complete → report 流程。
 
-- [ ] **Step 6: Run protocol tests, type checks and commit**
+- [ ] **步骤 6：运行协议测试、类型检查并提交**
 
-Run:
+运行：
 
 ~~~powershell
 Set-Location apps/api
@@ -616,7 +616,7 @@ Set-Location ..\..\apps\worker
 ..\api\.venv\Scripts\python.exe -m pytest tests -q
 ~~~
 
-Expected: PASS. Commit:
+预期：PASS。提交：
 
 ~~~powershell
 git add apps/api/app/api/worker.py apps/api/app/services/worker_protocol.py apps/api/app/main.py apps/api/migrations/versions/0004_worker_protocol.py apps/worker
@@ -625,31 +625,31 @@ git commit -m "feat: add native worker protocol foundation"
 
 ---
 
-### Task 5: 用持久化 Outbox 替换内存事件代理
+### 任务 5：用持久化 Outbox 替换内存事件代理
 
-**Files:**
+**文件：**
 
-- Modify: apps/api/app/services/events.py
-- Create: apps/api/app/services/outbox.py
-- Create: apps/api/app/api/events.py
-- Modify: apps/api/app/api/runs.py
-- Modify: apps/api/app/main.py
-- Modify: apps/web/src/hooks/useRunEvents.ts
-- Modify: apps/web/src/api/client.ts
-- Test: apps/api/tests/test_outbox_stream.py
-- Test: apps/api/tests/test_sse.py
-- Test: apps/web/src/api/client.test.ts
-- Test: apps/web/src/pages/RunDetailPage.test.tsx
+- 修改：apps/api/app/services/events.py
+- 新建：apps/api/app/services/outbox.py
+- 新建：apps/api/app/api/events.py
+- 修改：apps/api/app/api/runs.py
+- 修改：apps/api/app/main.py
+- 修改：apps/web/src/hooks/useRunEvents.ts
+- 修改：apps/web/src/api/client.ts
+- 测试：apps/api/tests/test_outbox_stream.py
+- 测试：apps/api/tests/test_sse.py
+- 测试：apps/web/src/api/client.test.ts
+- 测试：apps/web/src/pages/RunDetailPage.test.tsx
 
-**Interfaces:**
+**接口：**
 
-- Produces read_events_after(cursor: int, resource_id: UUID | None, limit: int) -> list[OutboxEvent].
-- Produces format_outbox_sse(event: OutboxEvent) -> str with id, event and JSON data.
-- Keeps a compatibility endpoint GET /api/runs/{run_id}/events backed by the Outbox during migration.
+- 输出 read_events_after(cursor: int, resource_id: UUID | None, limit: int) -> list[OutboxEvent]。
+- 输出 format_outbox_sse(event: OutboxEvent) -> str，其中包含 id、event 和 JSON data。
+- 迁移期间保留由 Outbox 支撑的兼容端点 GET /api/runs/{run_id}/events。
 
-- [ ] **Step 1: Write failing reconnect and ordering tests**
+- [ ] **步骤 1：编写失败的重连和顺序测试**
 
-Test that a client disconnects after event 2 and reconnects with Last-Event-ID: 2, receiving event 3 onward; test that two API processes reading the same Outbox see the same event IDs; test that a missing run returns 404 without creating a subscription.
+测试客户端在 event 2 后断开，并使用 Last-Event-ID: 2 重连后从 event 3 开始接收；测试两个 API 进程读取同一个 Outbox 时看到相同的事件 ID；测试不存在的运行返回 404 且不创建订阅。
 
 ~~~python
 def test_sse_reconnects_from_last_event_id(api_client, outbox_events):
@@ -658,32 +658,32 @@ def test_sse_reconnects_from_last_event_id(api_client, outbox_events):
     assert "id: 3" in response.text
 ~~~
 
-- [ ] **Step 2: Run event tests to verify the current broker loses history**
+- [ ] **步骤 2：运行事件测试，确认当前 broker 会丢失历史**
 
-Run:
+运行：
 
 ~~~powershell
 Set-Location apps/api
 .\.venv\Scripts\python.exe -m pytest tests/test_sse.py tests/test_outbox_stream.py -q
 ~~~
 
-Expected: the new durable-history assertions fail against the process-local EventBroker.
+预期：新的持久化历史断言在进程内 EventBroker 上失败。
 
-- [ ] **Step 3: Route domain events through the Outbox transaction**
+- [ ] **步骤 3：通过 Outbox 事务传递领域事件**
 
-Replace direct event_broker.publish() calls in run, approval and audit paths with append_outbox_event() in the same transaction that changes the run/action state. Keep event_to_sse() only as a serializer for durable events; remove the process-local counter and subscriber map from production code.
+将运行、审批和审计路径中的直接 event_broker.publish() 调用替换为 append_outbox_event()，并放入修改 run/action 状态的同一事务中。保留 event_to_sse() 作为持久化事件的序列化器；从生产代码中移除进程内计数器和订阅者映射。
 
-- [ ] **Step 4: Implement the durable SSE reader**
+- [ ] **步骤 4：实现持久化 SSE 读取器**
 
-The endpoint must read existing rows first, then poll for new rows with a bounded database interval, emit a 15-second heartbeat, and close cleanly on client cancellation. Use Last-Event-ID and an explicit after query parameter; the smaller effective cursor wins only when both are valid integers. Redact payloads before serialization and cap each event payload.
+端点必须先读取已有行，然后以有界数据库间隔轮询新行，每 15 秒发送一次 heartbeat，并在客户端取消时干净关闭。使用 Last-Event-ID 和显式的 after 查询参数；只有两者都是有效整数时，才采用较小的有效游标。序列化前脱敏 payload，并限制每个事件 payload 的大小。
 
-- [ ] **Step 5: Update the frontend reconnect behavior**
+- [ ] **步骤 5：更新前端重连行为**
 
-useRunEvents must retain the last numeric event ID, reconnect after network errors with exponential backoff capped at 30 seconds, and refetch the run detail after reconnect. A stale or malformed event must not overwrite the REST status.
+useRunEvents 必须保留最近的数字事件 ID，在网络错误后使用上限为 30 秒的指数退避重连，并在重连后重新获取运行详情。过期或格式错误的事件不得覆盖 REST 状态。
 
-- [ ] **Step 6: Run backend/frontend event tests and commit**
+- [ ] **步骤 6：运行后端/前端事件测试并提交**
 
-Run:
+运行：
 
 ~~~powershell
 Set-Location apps/api
@@ -693,7 +693,7 @@ npm.cmd test -- --run src/api/client.test.ts src/pages/RunDetailPage.test.tsx
 npm.cmd run typecheck
 ~~~
 
-Expected: PASS. Commit:
+预期：PASS。提交：
 
 ~~~powershell
 git add apps/api/app/services/events.py apps/api/app/services/outbox.py apps/api/app/api/events.py apps/api/app/api/runs.py apps/api/app/main.py apps/web/src/hooks/useRunEvents.ts apps/web/src/api/client.ts apps/api/tests/test_outbox_stream.py apps/api/tests/test_sse.py apps/web/src/api/client.test.ts apps/web/src/pages/RunDetailPage.test.tsx
@@ -702,33 +702,33 @@ git commit -m "feat: make run events durable and reconnectable"
 
 ---
 
-### Task 6: 移除请求内后台任务并接入持久化控制 Worker
+### 任务 6：移除请求内后台任务并接入持久化控制 Worker
 
-**Files:**
+**文件：**
 
-- Create: apps/api/app/processes/__init__.py
-- Create: apps/api/app/processes/control_worker.py
-- Modify: apps/api/app/api/runs.py
-- Modify: apps/api/app/services/runs.py
-- Modify: apps/api/app/api/approvals.py
-- Modify: apps/api/app/services/approvals.py
-- Modify: apps/api/app/services/agent_loop.py
-- Modify: apps/api/app/services/executor.py
-- Modify: compose.yaml
-- Test: apps/api/tests/test_durable_runs.py
-- Test: apps/api/tests/test_approval_queue.py
-- Test: apps/api/tests/test_control_worker.py
+- 新建：apps/api/app/processes/__init__.py
+- 新建：apps/api/app/processes/control_worker.py
+- 修改：apps/api/app/api/runs.py
+- 修改：apps/api/app/services/runs.py
+- 修改：apps/api/app/api/approvals.py
+- 修改：apps/api/app/services/approvals.py
+- 修改：apps/api/app/services/agent_loop.py
+- 修改：apps/api/app/services/executor.py
+- 修改：compose.yaml
+- 测试：apps/api/tests/test_durable_runs.py
+- 测试：apps/api/tests/test_approval_queue.py
+- 测试：apps/api/tests/test_control_worker.py
 
-**Interfaces:**
+**接口：**
 
-- RunService.create(user_request: str, source: ClientIdentity) -> AgentRun returns a queued run and enqueues one agent_run_resume task.
-- ApprovalService.decide(action_id: UUID, decision: ApprovalDecision, operator: Operator, note: str | None) -> ToolAction persists the decision and enqueues one resume task; it does not call AgentRunner or ToolExecutor in the request.
-- ControlWorker.run_once() -> int claims and executes at most one control-plane task using a fresh database session.
-- ControlWorker.run_forever() -> None runs the durable claim loop and exits non-zero on an unrecoverable configuration error.
+- RunService.create(user_request: str, source: ClientIdentity) -> AgentRun 返回 queued 运行记录，并加入一个 agent_run_resume 任务。
+- ApprovalService.decide(action_id: UUID, decision: ApprovalDecision, operator: Operator, note: str | None) -> ToolAction 持久化决策并加入一个 resume 任务；请求中不调用 AgentRunner 或 ToolExecutor。
+- ControlWorker.run_once() -> int 使用新的数据库会话认领并执行至多一个控制平面任务。
+- ControlWorker.run_forever() -> None 运行持久化认领循环，并在遇到不可恢复的配置错误时以非零状态退出。
 
-- [ ] **Step 1: Write failing durable-run and approval tests**
+- [ ] **步骤 1：编写失败的持久化运行和审批测试**
 
-Cover these exact transitions:
+覆盖以下精确状态转换：
 
 ~~~python
 def test_create_run_returns_queued_and_enqueues_one_resume_task(authenticated_client, session):
@@ -747,38 +747,38 @@ def test_approval_does_not_execute_inside_http_request(approved_action_client, s
     assert one_task(session, kind="agent_run_resume").status == "queued"
 ~~~
 
-- [ ] **Step 2: Run the focused tests to verify the current BackgroundTasks/direct-resume behavior**
+- [ ] **步骤 2：运行重点测试，确认当前 BackgroundTasks/direct-resume 行为**
 
-Run:
+运行：
 
 ~~~powershell
 Set-Location apps/api
 .\.venv\Scripts\python.exe -m pytest tests/test_durable_runs.py tests/test_approval_queue.py tests/test_control_worker.py -q
 ~~~
 
-Expected: FAIL because RunService adds BackgroundTasks and ApprovalService directly executes/resumes the agent.
+预期：FAIL，因为 RunService 添加 BackgroundTasks，ApprovalService 直接执行/恢复 Agent。
 
-- [ ] **Step 3: Make run creation durable and request-scoped**
+- [ ] **步骤 3：让运行创建持久化并限定在请求范围内**
 
-Remove BackgroundTasks from POST /api/runs. Create the run, initial checkpoint, audit event and agent_run_resume task in one transaction. Return 202 with queued status. The HTTP dependency session must be closed before any provider call starts.
+从 POST /api/runs 移除 BackgroundTasks。在一个事务中创建运行记录、初始 checkpoint、审计事件和 agent_run_resume 任务。返回状态码 202 及 queued 状态。任何 provider 调用开始前，HTTP 依赖使用的 session 必须已关闭。
 
-- [ ] **Step 4: Make approvals conditional and asynchronous**
+- [ ] **步骤 4：让审批具备条件约束并异步执行**
 
-In one transaction, require pending_approval, bind the authenticated operator, note, action parameter digest and active policy version, transition the action, append the audit event and enqueue one resume task. A duplicate approval returns 409 and creates no second task. A denied action produces a persisted safe result without invoking a handler.
+在一个事务中，要求 pending_approval，绑定已认证的 Operator、备注、动作参数摘要和生效中的策略版本，转换动作状态，追加审计事件并加入一个 resume 任务。重复审批返回 409，且不创建第二个任务。被拒绝的动作生成持久化的安全结果，不调用 handler。
 
-- [ ] **Step 5: Implement the isolated control Worker loop**
+- [ ] **步骤 5：实现隔离的控制 Worker 循环**
 
-control_worker.py must create a new SQLModel session per claimed task, run the existing provider-neutral AgentRunner only for agent_run_resume, and close the session after completion. It must not use FastAPI BackgroundTasks, request objects, process-local event state or a session captured from an API request.
+control_worker.py 必须为每个认领的任务创建新的 SQLModel session，仅针对 agent_run_resume 运行现有的 provider-neutral AgentRunner，并在完成后关闭 session。它不得使用 FastAPI BackgroundTasks、request 对象、进程内事件状态，或从 API 请求中捕获的 session。
 
-For the legacy simulated ToolExecutor, keep handler injection available to tests. In production-like mode, an unregistered or host-affecting handler must return a safe denied result; real host actions are not added in this phase.
+对于旧版模拟 ToolExecutor，保留供测试使用的 handler 注入。在类生产模式下，未注册或会影响宿主机的 handler 必须返回安全的拒绝结果；本阶段不增加真实宿主机动作。
 
-- [ ] **Step 6: Add crash and duplicate recovery tests**
+- [ ] **步骤 6：新增崩溃和重复操作恢复测试**
 
-Test API restart after enqueue, control Worker restart before claim, lease expiry during a read-only run, duplicate approval, provider timeout and malformed payload. Assert that an action with possible side effects enters manual_review rather than executing twice.
+测试加入任务后的 API 重启、认领前的控制 Worker 重启、只读运行期间的租约过期、重复审批、provider 超时和格式错误的 payload。断言可能产生副作用的动作进入 manual_review，而不是执行两次。
 
-- [ ] **Step 7: Run focused and existing run/approval tests, then commit**
+- [ ] **步骤 7：运行重点测试和现有运行/审批测试，然后提交**
 
-Run:
+运行：
 
 ~~~powershell
 Set-Location apps/api
@@ -787,7 +787,7 @@ Set-Location apps/api
 .\.venv\Scripts\python.exe -m mypy app
 ~~~
 
-Expected: PASS. Commit:
+预期：PASS。提交：
 
 ~~~powershell
 git add apps/api/app/processes apps/api/app/api/runs.py apps/api/app/services/runs.py apps/api/app/api/approvals.py apps/api/app/services/approvals.py apps/api/app/services/agent_loop.py apps/api/app/services/executor.py compose.yaml apps/api/tests/test_durable_runs.py apps/api/tests/test_approval_queue.py apps/api/tests/test_control_worker.py
@@ -796,34 +796,34 @@ git commit -m "feat: move runs and approvals onto durable control jobs"
 
 ---
 
-### Task 7: Compose 运行拓扑、Worker 开发启动和平台自检
+### 任务 7：Compose 运行拓扑、Worker 开发启动和平台自检
 
-**Files:**
+**文件：**
 
-- Modify: compose.yaml
-- Modify: apps/api/Dockerfile
-- Modify: scripts/start-local.ps1
-- Modify: scripts/stop-local.ps1
-- Create: scripts/migrate-local.ps1
-- Create: scripts/setup-local.ps1
-- Create: scripts/verify-foundation.ps1
-- Modify: README.md
-- Modify: docs/architecture.md
-- Create: apps/api/app/api/platform.py
-- Create: apps/api/app/services/platform_checks.py
-- Test: apps/api/tests/test_platform_checks.py
-- Test: apps/api/tests/test_compose_contract.py
+- 修改：compose.yaml
+- 修改：apps/api/Dockerfile
+- 修改：scripts/start-local.ps1
+- 修改：scripts/stop-local.ps1
+- 新建：scripts/migrate-local.ps1
+- 新建：scripts/setup-local.ps1
+- 新建：scripts/verify-foundation.ps1
+- 修改：README.md
+- 修改：docs/architecture.md
+- 新建：apps/api/app/api/platform.py
+- 新建：apps/api/app/services/platform_checks.py
+- 测试：apps/api/tests/test_platform_checks.py
+- 测试：apps/api/tests/test_compose_contract.py
 
-**Interfaces:**
+**接口：**
 
-- GET /api/platform/health returns separate API/database/queue/Outbox/Worker checks with Chinese display labels and stable English codes.
-- GET /api/platform/self-check returns migration head, queue latency, Worker heartbeat age and configured provider metadata without secrets.
-- scripts/setup-local.ps1 prints the bootstrap-token file path, starts required services and opens the Chinese UI only after health checks pass.
-- scripts/verify-foundation.ps1 exits non-zero for a missing migration, missing Worker heartbeat, stale queue lease or exposed PostgreSQL port.
+- GET /api/platform/health 返回分开的 API/database/queue/Outbox/Worker 检查结果，带中文显示标签和稳定的英文 code。
+- GET /api/platform/self-check 返回 migration head、队列延迟、Worker 心跳年龄和已配置的 provider 元数据，但不包含敏感信息。
+- scripts/setup-local.ps1 输出 bootstrap-token 文件路径，启动所需服务，并仅在健康检查通过后打开中文界面。
+- scripts/verify-foundation.ps1 在迁移缺失、Worker 心跳缺失、队列租约过期或 PostgreSQL 端口暴露时以非零状态退出。
 
-- [ ] **Step 1: Write failing Compose and platform-check tests**
+- [ ] **步骤 1：编写失败的 Compose 和平台检查测试**
 
-Use a YAML parser or explicit text assertions to verify:
+使用 YAML 解析器或明确的文本断言验证：
 
 ~~~python
 def test_postgres_has_no_published_host_port(compose_config):
@@ -835,32 +835,32 @@ def test_platform_health_distinguishes_worker_and_target_health(client):
     assert set(response.json()["checks"]) >= {"database", "outbox", "worker"}
 ~~~
 
-- [ ] **Step 2: Run focused tests to verify the current two-service Compose contract is incomplete**
+- [ ] **步骤 2：运行重点测试，确认当前双服务 Compose 契约不完整**
 
-Run:
+运行：
 
 ~~~powershell
 Set-Location apps/api
 .\.venv\Scripts\python.exe -m pytest tests/test_platform_checks.py tests/test_compose_contract.py -q
 ~~~
 
-Expected: FAIL because PostgreSQL, control Worker, migration command and platform checks do not exist.
+预期：FAIL，因为不存在 PostgreSQL、控制 Worker、迁移命令和平台检查。
 
-- [ ] **Step 3: Define the Compose services and safe bindings**
+- [ ] **步骤 3：定义 Compose 服务和安全绑定**
 
-Add postgres, api, scheduler and control-worker using the same API image where appropriate, while retaining web. Bind API and Web to 127.0.0.1; do not publish PostgreSQL. Add healthchecks that use /health and a database readiness query. Make scheduler responsible for due-task enqueueing and lease cleanup; make control-worker responsible for claiming agent_run_resume and control-plane tasks.
+在适当情况下使用同一个 API 镜像新增 postgres、api、scheduler 和 control-worker，同时保留 web。将 API 和 Web 绑定到 127.0.0.1；不要发布 PostgreSQL 端口。新增使用 /health 和数据库就绪查询的 healthcheck。由 scheduler 负责到期任务入队和租约清理；由 control-worker 负责认领 agent_run_resume 和控制平面任务。
 
-- [ ] **Step 4: Add operator setup and verification scripts**
+- [ ] **步骤 4：新增 Operator 初始化和验证脚本**
 
-start-local.ps1 must run migrations before services, wait for health, and use npm.cmd only for frontend development commands. setup-local.ps1 must never echo token contents into logs; it may print the protected file path and a command for the operator to read it locally. verify-foundation.ps1 must check localhost-only bindings, migration head, authentication status, Worker heartbeat and a no-op worker.self_check round trip.
+start-local.ps1 必须在服务启动前运行迁移、等待健康检查，并且前端开发命令只能使用 npm.cmd。setup-local.ps1 绝不能将令牌内容回显到日志；可以输出受保护文件路径和供 Operator 在本地读取它的命令。verify-foundation.ps1 必须检查仅 localhost 绑定、migration head、认证状态、Worker 心跳以及无副作用的 worker.self_check 往返流程。
 
-- [ ] **Step 5: Add platform self-checks and Chinese documentation**
+- [ ] **步骤 5：新增平台自检和中文文档**
 
-Return structured check objects with status, code, message_zh, observed_at and bounded details. Update README and architecture docs to remove “SQLite production evolution” wording where the new Compose path is described, document npm.cmd, the migration command, first-run setup and the boundary that no real host action exists before later phases.
+返回包含 status、code、message_zh、observed_at 和有界 details 的结构化检查对象。更新 README 和架构文档：在介绍新的 Compose 路径处移除“SQLite production evolution”表述，记录 npm.cmd、迁移命令、首次运行初始化，以及后续阶段之前不存在真实宿主机动作这一边界。
 
-- [ ] **Step 6: Run Compose smoke tests and commit**
+- [ ] **步骤 6：运行 Compose 冒烟测试并提交**
 
-Run:
+运行：
 
 ~~~powershell
 Set-Location .
@@ -872,7 +872,7 @@ Set-Location apps/api
 .\.venv\Scripts\python.exe -m pytest tests/test_platform_checks.py tests/test_compose_contract.py -q
 ~~~
 
-Expected: the stack starts with PostgreSQL, authenticated API, control Worker and native Worker protocol self-check; verification exits 0. Commit:
+预期：栈启动后包含 PostgreSQL、已认证 API、控制 Worker 和原生 Worker 协议自检；验证以 0 退出。提交：
 
 ~~~powershell
 git add compose.yaml apps/api/Dockerfile scripts/start-local.ps1 scripts/stop-local.ps1 scripts/migrate-local.ps1 scripts/setup-local.ps1 scripts/verify-foundation.ps1 README.md docs/architecture.md apps/api/app/api/platform.py apps/api/app/services/platform_checks.py apps/api/tests/test_platform_checks.py apps/api/tests/test_compose_contract.py
@@ -881,29 +881,29 @@ git commit -m "feat: package reliable local foundation"
 
 ---
 
-### Task 8: 安全回归、故障注入和阶段 0 验收
+### 任务 8：安全回归、故障注入和阶段 0 验收
 
-**Files:**
+**文件：**
 
-- Create: apps/api/tests/test_security_regressions.py
-- Create: apps/api/tests/test_failure_injection.py
-- Create: apps/web/e2e/auth-and-queue.spec.ts
-- Modify: apps/web/e2e/approval-flow.spec.ts
-- Modify: apps/api/app/services/audit.py
-- Modify: apps/api/app/api/runs.py
-- Modify: apps/api/app/api/approvals.py
-- Modify: apps/web/src/components/ApprovalCard.tsx
-- Modify: apps/web/src/pages/RunDetailPage.tsx
-- Modify: apps/web/src/pages/RunsPage.tsx
+- 新建：apps/api/tests/test_security_regressions.py
+- 新建：apps/api/tests/test_failure_injection.py
+- 新建：apps/web/e2e/auth-and-queue.spec.ts
+- 修改：apps/web/e2e/approval-flow.spec.ts
+- 修改：apps/api/app/services/audit.py
+- 修改：apps/api/app/api/runs.py
+- 修改：apps/api/app/api/approvals.py
+- 修改：apps/web/src/components/ApprovalCard.tsx
+- 修改：apps/web/src/pages/RunDetailPage.tsx
+- 修改：apps/web/src/pages/RunsPage.tsx
 
-**Interfaces:**
+**接口：**
 
-- No new public feature is introduced; this task proves the contracts from Tasks 1–7.
-- Produces a machine-readable local verification result outside Git or in the existing ignored eval output path.
+- 不引入新的公开功能；本任务验证任务 1–7 的契约。
+- 在 Git 之外或现有被忽略的评测输出路径中生成机器可读的本地验证结果。
 
-- [ ] **Step 1: Write the security regression matrix**
+- [ ] **步骤 1：编写安全回归矩阵**
 
-Add tests for:
+新增以下测试：
 
 ~~~python
 def test_unknown_action_is_denied_without_worker_task(client, session):
@@ -939,26 +939,26 @@ def test_unscoped_client_token_cannot_approve(client, propose_only_token, pendin
     assert response.status_code == 403
 ~~~
 
-The tests must assert both no system-side effect and an auditable safe result. Test payloads must use fake values, never a real API key or token.
+测试必须同时断言没有系统侧副作用，并且生成可审计的安全结果。测试 payload 必须使用伪值，绝不能使用真实 API key 或令牌。
 
-- [ ] **Step 2: Write fault-injection tests for each approved failure behavior**
+- [ ] **步骤 2：为每种已批准的失败行为编写故障注入测试**
 
-Inject database disconnect before claim, API disconnect after execution grant, control Worker crash before completion, native Worker crash after start, browser SSE disconnect and duplicate approval. Assert:
+注入以下故障：认领前数据库断开、取得执行授权后 API 断开、完成前控制 Worker 崩溃、启动后原生 Worker 崩溃、浏览器 SSE 断开和重复审批。断言：
 
-- database failure stops claim and state-changing execution;
-- a pre-grant disconnect causes no handler call;
-- a post-grant disconnect writes and later reports the Worker journal result;
-- side-effect-uncertain work becomes manual_review;
-- reconnecting the browser reads the Outbox cursor;
-- duplicate approval returns conflict and creates no extra task.
+- 数据库故障会停止认领和状态变更执行；
+- 取得授权前断开不会调用 handler；
+- 取得授权后断开会写入 Worker 日志结果，并在之后回报；
+- 无法确定副作用的工作会进入 manual_review；
+- 浏览器重连会读取 Outbox 游标；
+- 重复审批返回冲突，且不创建额外任务。
 
-- [ ] **Step 3: Add Chinese E2E coverage**
+- [ ] **步骤 3：新增中文 E2E 覆盖**
 
-The Playwright flow must start from the login page, complete first-run setup with a test bootstrap token, create a run, show queued/running state, display a pending approval, reject it, refresh the page, and confirm the audit timeline still contains the decision. Use AGENTGATE_E2E_PYTHON and npm.cmd in the documented Windows command.
+Playwright 流程必须从登录页开始，使用测试 bootstrap token 完成首次运行初始化，创建一次运行，显示 queued/running 状态，展示待审批动作，拒绝该动作，刷新页面，并确认审计时间线仍包含该决策。按文档中的 Windows 命令使用 AGENTGATE_E2E_PYTHON 和 npm.cmd。
 
-- [ ] **Step 4: Run the complete stage 0 verification**
+- [ ] **步骤 4：运行完整的阶段 0 验证**
 
-Run:
+运行：
 
 ~~~powershell
 Set-Location apps/api
@@ -979,11 +979,11 @@ docker compose config
 .\scripts\verify-foundation.ps1
 ~~~
 
-Expected: all static checks, backend tests, deterministic evals, frontend tests/build, E2E and foundation verification pass. Record the exact output in the release note, not in a tracked secret-bearing file.
+预期：所有静态检查、后端测试、确定性评测、前端测试/构建、E2E 和基础验证均通过。将完整输出记录在发布说明中，不要写入受 Git 跟踪且可能包含敏感信息的文件。
 
-- [ ] **Step 5: Verify scope and working tree before the stage commit**
+- [ ] **步骤 5：在阶段提交前验证范围和工作区**
 
-Run:
+运行：
 
 ~~~powershell
 git diff --check
@@ -991,9 +991,9 @@ git status --short
 git diff --stat HEAD~8..HEAD
 ~~~
 
-Confirm that no task added arbitrary shell execution, remote target support, file mutation, real service restart or model dependency. Confirm pre-existing user modifications remain present and are not part of the stage commits.
+确认没有任何任务新增任意 Shell 执行、远程目标支持、文件变更、真实服务重启或模型依赖。确认预先存在的用户改动仍然存在，且不属于阶段提交。
 
-- [ ] **Step 6: Commit the stage 0 verification**
+- [ ] **步骤 6：提交阶段 0 验证结果**
 
 ~~~powershell
 git add apps/api/tests/test_security_regressions.py apps/api/tests/test_failure_injection.py apps/api/app/services/audit.py apps/api/app/api/runs.py apps/api/app/api/approvals.py apps/web/e2e/auth-and-queue.spec.ts apps/web/e2e/approval-flow.spec.ts apps/web/src/components/ApprovalCard.tsx apps/web/src/pages/RunDetailPage.tsx apps/web/src/pages/RunsPage.tsx

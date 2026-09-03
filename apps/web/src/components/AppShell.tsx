@@ -3,7 +3,7 @@ import { NavLink, Outlet } from "react-router-dom";
 import { api } from "../api/client";
 
 export function AppShell() {
-  const [provider, setProvider] = useState("loading");
+  const [provider, setProvider] = useState("加载中");
   const [connected, setConnected] = useState(false);
 
   useEffect(() => {
@@ -14,7 +14,7 @@ export function AppShell() {
       setConnected(meta.status === "ok");
     }).catch(() => {
       if (!active) return;
-      setProvider("unavailable");
+      setProvider("不可用");
       setConnected(false);
     });
     return () => {
@@ -24,31 +24,32 @@ export function AppShell() {
 
   return (
     <div className="app-frame">
+      <a className="skip-link" href="#main-content">跳到主要内容</a>
       <aside className="sidebar">
         <div className="brand-lockup">
           <span className="brand-mark" aria-hidden="true">AG</span>
           <div>
             <h1>AgentGate</h1>
-            <span>control plane</span>
+            <span>控制平面</span>
           </div>
         </div>
-        <div className="environment-chip"><span className="live-dot" /> Local Demo</div>
-        <nav aria-label="Primary navigation" className="primary-nav">
-          <span className="nav-label">Operate</span>
-          <NavLink to="/" end className={({ isActive }) => isActive ? "active" : ""}>Runs <span>01</span></NavLink>
-          <NavLink to="/policies" className={({ isActive }) => isActive ? "active" : ""}>Policies <span>02</span></NavLink>
-          <NavLink to="/audit" className={({ isActive }) => isActive ? "active" : ""}>Audit <span>03</span></NavLink>
+        <div className="environment-chip"><span className="live-dot" /> 本地演示</div>
+        <nav aria-label="主导航" className="primary-nav">
+          <span className="nav-label">操作</span>
+          <NavLink to="/" end className={({ isActive }) => isActive ? "active" : ""}>运行 <span>01</span></NavLink>
+          <NavLink to="/policies" className={({ isActive }) => isActive ? "active" : ""}>策略 <span>02</span></NavLink>
+          <NavLink to="/audit" className={({ isActive }) => isActive ? "active" : ""}>审计 <span>03</span></NavLink>
         </nav>
         <div className="sidebar-footer">
-          <span className="nav-label">Runtime</span>
-          <div className="runtime-row"><span>Provider</span><code>{provider}</code></div>
-          <div className="runtime-row"><span>Backend</span><span className={connected ? "connectivity connected" : "connectivity"}>{connected ? "Connected" : "Checking"}</span></div>
+          <span className="nav-label">运行环境</span>
+          <div className="runtime-row"><span>模型提供方</span><code translate="no">{provider}</code></div>
+          <div className="runtime-row"><span>后端</span><span className={connected ? "connectivity connected" : "connectivity"} aria-live="polite">{connected ? "已连接" : "检查中"}</span></div>
         </div>
       </aside>
-      <main className="main-content">
+      <main id="main-content" className="main-content">
         <header className="topbar">
-          <span className="topbar-path">Agent operations / <strong>Local environment</strong></span>
-          <span className="topbar-note">Every action leaves a trace</span>
+          <span className="topbar-path">Agent 操作 / <strong>本地环境</strong></span>
+          <span className="topbar-note">每个操作都会留下审计轨迹</span>
         </header>
         <Outlet />
       </main>

@@ -61,6 +61,8 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+    healthcheck:
+      disable: true
   control-worker:
     build: ./apps/api
     command: ["python", "-m", "app.processes.control_worker"]
@@ -76,13 +78,15 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+    healthcheck:
+      disable: true
   web:
     build:
       context: ./apps/web
       args:
         VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
     environment:
-      AGENTGATE_API_BASE_URL: http://localhost:${AGENTGATE_API_PORT:-8000}
+      AGENTGATE_API_BASE_URL: ${AGENTGATE_API_BASE_URL:-}
     depends_on:
       api:
         condition: service_healthy

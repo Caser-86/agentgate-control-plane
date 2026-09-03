@@ -16,6 +16,7 @@ COPY --from=build /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/nginx.conf
 COPY config.js.template /usr/share/nginx/html/config.js.template
 COPY docker-entrypoint.sh /docker-entrypoint.d/40-agentgate-config.sh
+RUN sed -i 's/\r$//' /docker-entrypoint.d/40-agentgate-config.sh
 
 EXPOSE 80
 

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ApiError } from "../api/client";
 import type { ToolAction } from "../types";
+import { reasonLabel, riskLabel, toolLabel } from "../i18n/zh-CN";
 import { StatusBadge } from "./StatusBadge";
 
 const secretKeys = new Set([
@@ -48,7 +49,7 @@ export function ApprovalCard({ action, onApprove, onDeny, onRefresh }: ApprovalC
       else await onDeny();
     } catch (reason) {
       const message = reason instanceof ApiError && reason.status === 409
-        ? "该操作已完成决定"
+        ? "该操作已经处理过"
         : "无法保存审批决定";
       setError(message);
       if (reason instanceof ApiError && reason.status === 409) onRefresh?.();
@@ -60,21 +61,21 @@ export function ApprovalCard({ action, onApprove, onDeny, onRefresh }: ApprovalC
   return (
     <section className="approval-card" aria-labelledby={`approval-${action.id}`} data-testid="approval-card">
       <div className={`decision-rail rail-${action.risk_level}`} aria-hidden="true">
-        <span>DECISION</span>
-        <strong>{action.risk_level.toUpperCase()}</strong>
+        <span>审批</span>
+        <strong>{riskLabel(action.risk_level)}</strong>
       </div>
       <div className="approval-content">
         <div className="approval-heading">
           <div>
             <span className="eyebrow">需要人工审批</span>
-            <h2 id={`approval-${action.id}`}>{action.tool_name}</h2>
+            <h2 id={`approval-${action.id}`}><span>{toolLabel(action.tool_name)}</span> <code translate="no">{action.tool_name}</code></h2>
           </div>
           <StatusBadge value={action.risk_level} />
         </div>
-        <p className="approval-reason">{action.reason}</p>
+        <p className="approval-reason">{reasonLabel(action.reason)}</p>
         <div className="approval-impact">
           <span>影响目标</span>
-          <strong>{String(action.arguments.service ?? "Local demo service")}</strong>
+          <strong translate="no">{String(action.arguments.service ?? "本地演示服务")}</strong>
         </div>
         <details className="arguments-panel" open>
           <summary>参数</summary>
@@ -90,7 +91,7 @@ export function ApprovalCard({ action, onApprove, onDeny, onRefresh }: ApprovalC
             onClick={() => void decide("approve")}
             disabled={pending !== null}
           >
-            {pending === "approve" ? "批准中…" : "批准"}
+            {pending === "approve" ? "正在批准…" : "批准"}
           </button>
           <button
             className="button button-secondary"
@@ -100,7 +101,7 @@ export function ApprovalCard({ action, onApprove, onDeny, onRefresh }: ApprovalC
             onClick={() => void decide("deny")}
             disabled={pending !== null}
           >
-            {pending === "deny" ? "拒绝中…" : "拒绝"}
+            {pending === "deny" ? "正在拒绝…" : "拒绝"}
           </button>
         </div>
       </div>

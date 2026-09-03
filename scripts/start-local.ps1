@@ -42,7 +42,7 @@ if (-not $ready) { throw "PostgreSQL did not become ready within 60 seconds." }
 if ($LASTEXITCODE -ne 0) { throw "Database migration failed." }
 
 Write-Host "Starting API, scheduler, control-worker and web..."
-docker compose up -d api scheduler control-worker web
+docker compose up -d --build api scheduler control-worker web
 $deadline = (Get-Date).AddSeconds(60)
 $healthy = $false
 while ((Get-Date) -lt $deadline) {

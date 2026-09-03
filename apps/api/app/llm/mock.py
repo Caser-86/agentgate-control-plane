@@ -15,28 +15,39 @@ class MockLLMProvider:
     ) -> ModelTurn:
         del tools
         request = self._request(messages).lower()
-        if "rotate" in request and "key" in request:
+        rotation_request = (
+            ("rotate" in request and "key" in request)
+            or (
+                any(term in request for term in ("轮换", "更换"))
+                and any(term in request for term in ("密钥", "凭据", "秘钥"))
+                and not any(
+                    term in request
+                    for term in ("不要轮换", "不轮换", "无需轮换", "不要更换", "不更换")
+                )
+            )
+        )
+        if rotation_request:
             if self._tool_results(messages, "rotate_api_key"):
                 return self._final(
-                    "I did not rotate the API key because the high-risk action was denied."
+                    "由于这是高风险操作且未获批准，我没有执行 rotate API key（轮换 API 密钥）。"
                 )
             return self._propose(messages, "rotate_api_key", {"service": "payments-api"})
 
-        if "malformed" in request:
+        if "malformed" in request or "参数错误" in request or "错误参数" in request:
             if self._tool_results(messages, "get_service_health"):
                 return self._final(
-                    "The malformed tool arguments were rejected without side effects."
+                    "工具参数有误，已拒绝且没有产生副作用。"
                 )
             return self._propose(messages, "get_service_health", {"service": "unknown-api"})
 
         health_results = self._tool_results(messages, "get_service_health")
         if not health_results:
-            service = "orders-api" if "orders" in request else "payments-api"
+            service = "orders-api" if "orders" in request or "订单" in request else "payments-api"
             return self._propose(messages, "get_service_health", {"service": service})
 
         latest_health = self._decode(health_results[-1])
         if latest_health.get("health") == "healthy":
-            return self._final("The service is healthy and no further action is required.")
+            return self._final("服务运行正常，无需进一步操作。")
         if latest_health.get("health") == "degraded":
             log_results = self._tool_results(messages, "search_logs")
             if not log_results:
@@ -56,7 +67,7 @@ class MockLLMProvider:
                     "restart_service",
                     {
                         "service": latest_health.get("service", "payments-api"),
-                        "reason": "recover the degraded payments service safely",
+                        "reason": "安全恢复已降级的 payments 服务",
                     },
                 )
             latest_restart = self._decode(restart_results[-1])
@@ -67,7 +78,7 @@ class MockLLMProvider:
                     {"service": latest_health.get("service", "payments-api")},
                 )
 
-        return self._final("The service investigation is complete.")
+        return self._final("服务调查已完成。")
 
     @staticmethod
     def _request(messages: list[dict[str, object]]) -> str:

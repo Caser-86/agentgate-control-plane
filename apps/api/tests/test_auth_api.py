@@ -52,6 +52,23 @@ def _csrf_headers(client: TestClient) -> dict[str, str]:
     return {"Origin": "http://localhost:5173", "X-CSRF-Token": token}
 
 
+@pytest.mark.parametrize(
+    ("password", "expected_status"),
+    [("abc12", 422), ("abc123", 201)],
+)
+def test_setup_requires_at_least_six_characters_for_password(
+    auth_client: tuple[TestClient, object, Path], password: str, expected_status: int
+) -> None:
+    client, _, token_file = auth_client
+
+    response = client.post(
+        "/api/auth/setup",
+        json={"bootstrap_token": token_file.read_text(encoding="utf-8"), "password": password},
+    )
+
+    assert response.status_code == expected_status
+
+
 def test_setup_consumes_bootstrap_hashes_password_and_sets_strict_cookie(
     auth_client: tuple[TestClient, object, Path]
 ) -> None:

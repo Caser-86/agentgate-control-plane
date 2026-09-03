@@ -39,6 +39,7 @@ def test_api_and_web_bind_only_to_loopback() -> None:
 
 def test_alternate_ports_render_consistently_through_compose() -> None:
     env = os.environ.copy()
+    env.pop("AGENTGATE_API_BASE_URL", None)
     env.update({"AGENTGATE_API_PORT": "18000", "AGENTGATE_WEB_PORT": "15173"})
     result = subprocess.run(
         ["docker", "compose", "config", "--format", "json"],
@@ -70,7 +71,7 @@ def test_alternate_ports_render_consistently_through_compose() -> None:
         }
     ]
     assert api["environment"]["AGENTGATE_WEB_PORT"] == "15173"
-    assert web["environment"]["AGENTGATE_API_BASE_URL"] == "http://localhost:18000"
+    assert web["environment"]["AGENTGATE_API_BASE_URL"] == ""
 
 
 def test_local_scripts_derive_configured_host_ports() -> None:
@@ -107,7 +108,11 @@ def test_local_scripts_run_migrations_before_services_and_use_npm_cmd() -> None:
     start_script = (REPO_ROOT / "scripts/start-local.ps1").read_text(encoding="utf-8")
     assert "migrate-local.ps1" in start_script
     assert "npm.cmd" in start_script
-    assert start_script.index("migrate-local.ps1") < start_script.index("docker compose up -d api")
+    assert start_script.index("migrate-local.ps1") < start_script.index("docker compose up -d --build api")
+    assert "docker compose up -d --build api scheduler control-worker web" in start_script
+    migrate_script = (REPO_ROOT / "scripts/migrate-local.ps1").read_text(encoding="utf-8")
+    assert "docker compose run --rm --build migrate" in migrate_script
+    assert "docker compose run --rm api" not in migrate_script
     verify_script = (REPO_ROOT / "scripts/verify-foundation.ps1").read_text(encoding="utf-8")
     assert "database_migration_current" in verify_script
 
@@ -156,6 +161,24 @@ def test_built_web_uses_runtime_config_without_stale_port_fallback() -> None:
     assert "localhost:8000" not in dockerfile
     assert '?? "http://localhost:8000"' not in client
     assert "AGENTGATE_API_BASE_URL" in template
+
+
+def test_web_entrypoint_normalizes_windows_line_endings() -> None:
+    dockerfile = (REPO_ROOT / "apps/web/Dockerfile").read_text(encoding="utf-8")
+    assert "sed -i 's/\\r$//' /docker-entrypoint.d/40-agentgate-config.sh" in dockerfile
+
+
+def test_background_services_disable_the_api_http_healthcheck() -> None:
+    for service in ("scheduler:", "control-worker:"):
+        lines = COMPOSE.split(f"  {service}", 1)[1].splitlines()[1:]
+        block_lines = []
+        for line in lines:
+            if line.startswith("  ") and not line.startswith("    "):
+                break
+            block_lines.append(line)
+        block = "\n".join(block_lines)
+        assert "healthcheck:" in block
+        assert "disable: true" in block
 
 
 def test_required_task7_operator_scripts_exist() -> None:

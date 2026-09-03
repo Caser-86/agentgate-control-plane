@@ -73,7 +73,7 @@ test("拒绝降级服务恢复并保留可审计记录", async ({ page }, testIn
   await expect(page).toHaveURL(/\/runs\/[0-9a-f-]+/);
   await expect.poll(() => hasRecordedRunStatus(page, createdRun.id, "running"), { timeout: 15_000, intervals: [100, 250, 500] }).toBe(true);
   await page.reload();
-  await expect(page.getByTestId("run-status")).toContainText("Waiting approval");
+  await expect(page.getByTestId("run-status")).toContainText("等待审批");
   await expect(page.getByTestId("approval-card")).toBeVisible({ timeout: 15_000 });
   await expect(page.getByTestId("approval-card")).toContainText("需要人工审批");
   const approval = page.getByTestId("approval-card");

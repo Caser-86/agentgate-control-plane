@@ -21,7 +21,7 @@ class AuthStatusResponse(BaseModel):
 
 class SetupRequest(BaseModel):
     bootstrap_token: str = Field(min_length=1, max_length=500)
-    password: str = Field(min_length=12, max_length=512)
+    password: str = Field(min_length=6, max_length=512)
 
 
 class LoginRequest(BaseModel):

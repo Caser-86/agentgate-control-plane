@@ -1,32 +1,32 @@
-# Task 8 final verification report
+# 任务 8 最终验证报告
 
-## Follow-up Worker boundary fix — 2026-09-01
+## Worker 边界后续修复 — 2026-09-01
 
-- Native Worker URL validation now runs in both client construction paths and the main entry point before bearer/enrollment token use; direct tests cover remote DNS/IP, non-HTTP(S), malformed URLs, and IPv6 loopback acceptance.
-- `start-worker.ps1` explicit URL precedence and `verify-foundation.ps1` delegation are covered by API contract tests; remote URL rejection was executed without entering the Worker runtime.
-- Fresh final checks: API `171 passed, 5 skipped`; Worker `19 passed`; frontend `7 files / 14 tests passed`; Ruff/mypy, Compose config, PowerShell parse, and diff check passed.
+- 原生 Worker URL 校验现在会在客户端两条构造路径和主入口中、使用 bearer/enrollment token 之前执行；直接测试覆盖远程 DNS/IP、非 HTTP(S)、格式错误 URL 以及 IPv6 回环地址的接受行为。
+- `start-worker.ps1` 的显式 URL 优先级和 `verify-foundation.ps1` 的委托关系由 API 契约测试覆盖；远程 URL 拒绝测试在未进入 Worker 运行时的情况下完成。
+- 最新最终检查：API `171 passed, 5 skipped`；Worker `19 passed`；前端 `7 files / 14 tests passed`；Ruff/mypy、Compose 配置、PowerShell 解析和 diff 检查通过。
 
-Limitations: no services were started or stopped; live foundation verification, Docker build, and PostgreSQL runtime tests remain unexecuted (`AGENTGATE_TEST_DATABASE_URL` is unset).
+限制：没有启动或停止服务；底座实时验证、Docker 构建和 PostgreSQL 运行时测试尚未执行（未设置 `AGENTGATE_TEST_DATABASE_URL`）。
 
-## Evidence
+## 验证证据
 
-- Script contract coverage: `10 passed` (`apps/api/tests/test_compose_contract.py`). It proves the three local scripts parse Compose host ports and that foundation verification selects `apps/worker/.venv`, checks `win32crypt`, and never falls back to `apps/api/.venv`.
-- Worker tests: `8 passed`. The local-only `apps/worker/.venv` was created and installed with `pip install -e apps/worker`; `import win32crypt` succeeded.
-- Backend: `165 passed, 5 skipped`; Ruff: `All checks passed!`; mypy: `Success: no issues found in 53 source files`.
-- Frontend: lint, typecheck and build exited `0`; unit tests: `7` files / `13` tests passed.
-- `docker compose config`: exited `0`; Postgres has no published port and API/Web remain loopback-only. With `AGENTGATE_API_PORT=18000` and `AGENTGATE_WEB_PORT=15173`, rendered host ports were `18000/15173`.
-- PowerShell parser checks for `start-local.ps1`, `setup-local.ps1`, and `verify-foundation.ps1`, plus `git diff --check`, exited `0`.
+- 脚本契约覆盖：`10 passed`（`apps/api/tests/test_compose_contract.py`）。它证明三个本地脚本可以解析 Compose 宿主机端口，底座验证选择 `apps/worker/.venv`、检查 `win32crypt`，且不会回退到 `apps/api/.venv`。
+- Worker 测试：`8 passed`。本地专用的 `apps/worker/.venv` 已创建，并通过 `pip install -e apps/worker` 安装；`import win32crypt` 成功。
+- 后端：`165 passed, 5 skipped`；Ruff：`All checks passed!`；mypy：`Success: no issues found in 53 source files`。
+- 前端：lint、typecheck 和 build 退出码为 `0`；单元测试：`7` 个文件、`13` 个测试通过。
+- `docker compose config`：退出码为 `0`；Postgres 没有发布端口，API/Web 仍然只绑定回环地址。当 `AGENTGATE_API_PORT=18000`、`AGENTGATE_WEB_PORT=15173` 时，解析出的宿主机端口为 `18000/15173`。
+- `start-local.ps1`、`setup-local.ps1`、`verify-foundation.ps1` 的 PowerShell 解析检查以及 `git diff --check` 均退出码为 `0`。
 
-## Limitations
+## 限制
 
-- No bounded E2E or live foundation verification was run: doing so would require starting Compose services, and this task explicitly prohibited starting/stopping user services without an explicit bounded operation.
-- No PostgreSQL runtime test was available because `AGENTGATE_TEST_DATABASE_URL` is not configured; the existing PostgreSQL tests remain skipped under their own fixture rules.
-- The local Worker environment is ignored/local-only and is not part of the commit. `setup-local.ps1` recreates or updates it idempotently without printing token contents.
+- 没有运行有界 E2E 或底座实时验证：这需要启动 Compose 服务，而本任务明确禁止在没有明确有界操作授权时启动/停止用户服务。
+- 未配置 `AGENTGATE_TEST_DATABASE_URL`，因此没有可用的 PostgreSQL 运行时测试；现有 PostgreSQL 测试按照各自的 fixture 规则保持跳过。
+- 本地 Worker 环境被忽略且只属于本机，不在提交内容中。`setup-local.ps1` 可以幂等地创建或更新该环境，但不会打印 token 内容。
 
-## Final port and Worker runtime fix pass — 2026-09-01
+## 最终端口与 Worker 运行时修复轮次 — 2026-09-01
 
-- `AGENTGATE_API_PORT=18000` and `AGENTGATE_WEB_PORT=15173` render loopback API/Web bindings and matching API CORS/Web runtime configuration; defaults render as `8000/5173`.
-- API focused port/Compose contract: `16 passed`; API full: `169 passed, 5 skipped`; Ruff/mypy/evals passed. Web: lint/typecheck/build passed and `7 files / 14 tests passed`. Worker: `8 passed` plus `win32crypt` import from `apps/worker/.venv`.
-- `start-worker.ps1` derives the API port from `docker compose config --format json` when no URL/port is supplied, accepts only loopback HTTP URLs, and never falls back to `apps/api/.venv`. Setup and foundation verification use the same Worker environment and do not print token contents.
+- `AGENTGATE_API_PORT=18000` 和 `AGENTGATE_WEB_PORT=15173` 会生成回环 API/Web 绑定以及匹配的 API CORS/Web 运行时配置；默认端口为 `8000/5173`。
+- API 端口/Compose 重点契约：`16 passed`；API 全量：`169 passed, 5 skipped`；Ruff/mypy/evals 通过。Web：lint/typecheck/build 通过，`7 files / 14 tests passed`。Worker：`8 passed`，并成功从 `apps/worker/.venv` 导入 `win32crypt`。
+- 未提供 URL/端口时，`start-worker.ps1` 从 `docker compose config --format json` 推导 API 端口，只接受回环 HTTP URL，且不会回退到 `apps/api/.venv`。准备脚本和底座验证使用同一个 Worker 环境，并且不会打印 token 内容。
 
-Limitations: no Compose lifecycle was run. The read-only foundation verification attempt reported `API health check failed` because the Compose API was not running; Docker image build, live foundation verification, and PostgreSQL runtime tests are not claimed. The bounded temporary E2E run completed earlier with `2 passed` on `18220/18221`, and its ports were clean afterward.
+限制：没有运行 Compose 生命周期。只读底座验证尝试报告 `API health check failed`，因为 Compose API 没有运行；不宣称 Docker 镜像构建、底座实时验证和 PostgreSQL 运行时测试通过。此前的临时有界 E2E 在 `18220/18221` 端口完成，结果为 `2 passed`，结束后端口已清理。

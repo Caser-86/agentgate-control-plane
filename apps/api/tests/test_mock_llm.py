@@ -84,4 +84,21 @@ async def test_mock_explains_denied_key_rotation() -> None:
     final = await provider.complete(messages, TOOLS)
 
     assert final.tool_calls == ()
-    assert "rotate" in (final.text or "").lower()
+    assert "密钥" in (final.text or "")
+
+
+@pytest.mark.asyncio
+async def test_mock_understands_chinese_demo_requests() -> None:
+    provider = MockLLMProvider()
+
+    restore = await provider.complete(
+        [{"role": "user", "content": "检查 payments-api 并安全恢复，不要轮换凭据。"}],
+        TOOLS,
+    )
+    rotate = await provider.complete(
+        [{"role": "user", "content": "请轮换 payments-api 的 API 密钥。"}],
+        TOOLS,
+    )
+
+    assert restore.tool_calls[0].name == "get_service_health"
+    assert rotate.tool_calls[0].name == "rotate_api_key"

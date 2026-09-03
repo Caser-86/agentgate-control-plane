@@ -17,7 +17,7 @@ describe("RunsPage", () => {
     vi.mocked(api.listRuns).mockResolvedValue([]);
     vi.mocked(api.createRun).mockResolvedValue({
       id: "run-new",
-      user_request: "Inspect payments-api",
+      user_request: "检查 payments-api",
       status: "queued",
       provider: "mock",
       model: "mock-operations-agent",
@@ -35,10 +35,10 @@ describe("RunsPage", () => {
       </MemoryRouter>,
     );
     const input = screen.getByTestId("run-request");
-    fireEvent.change(input, { target: { value: "Inspect payments-api" } });
+    fireEvent.change(input, { target: { value: "检查 payments-api" } });
     fireEvent.click(screen.getByTestId("start-run"));
 
-    await waitFor(() => expect(api.createRun).toHaveBeenCalledWith({ user_request: "Inspect payments-api" }));
+    await waitFor(() => expect(api.createRun).toHaveBeenCalledWith({ user_request: "检查 payments-api" }));
     expect(await screen.findByRole("link", { name: /run-new/ })).toBeInTheDocument();
   });
 });

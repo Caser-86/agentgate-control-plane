@@ -32,7 +32,17 @@ export function LoginPage() {
         {sessionExpired && <button type="button" onClick={() => void refresh()}>重试</button>}
         <form onSubmit={(event) => void submit(event)}>
           {setupRequired && <label>引导令牌<input value={bootstrapToken} onChange={(event) => setBootstrapToken(event.target.value)} autoComplete="off" required /></label>}
-          <label>管理员密码<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" required /></label>
+          <label htmlFor="admin-password">管理员密码</label>
+          <input
+            id="admin-password"
+            type="password"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            autoComplete="current-password"
+            minLength={setupRequired ? 6 : undefined}
+            required
+          />
+          {setupRequired && <small>管理员密码至少 6 位</small>}
           <button type="submit" disabled={loading}>{setupRequired ? "完成初始化" : "登录"}</button>
         </form>
       </section>
