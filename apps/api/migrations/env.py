@@ -9,6 +9,7 @@ from sqlmodel import SQLModel
 import app.models  # noqa: F401
 import app.control.models  # noqa: F401
 import app.auth.models  # noqa: F401
+import app.monitoring.models  # noqa: F401
 
 config = context.config
 

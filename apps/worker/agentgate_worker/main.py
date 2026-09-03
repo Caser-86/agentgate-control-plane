@@ -27,7 +27,7 @@ def main() -> int:
         journal=WorkerJournal(options.state_dir / "journal.db"),
         worker_name=options.name,
         worker_version=options.version,
-        capabilities={"platform.self_check"},
+        capabilities={"platform.self_check", "monitor.http", "monitor.windows_service"},
     )
     try:
         if client.vault.load() is None:
@@ -39,7 +39,7 @@ def main() -> int:
         grant = client.claim()
         if grant is not None:
             client.start(grant)
-            client.complete(grant, client.self_check_result())
+            client.complete(grant, client.probe_result(grant))
     except WorkerProtocolError as error:
         print(f"Worker request failed: {error}")
         return 1

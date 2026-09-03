@@ -32,3 +32,12 @@
 - 工作树未提供可用的 `AGENTGATE_TEST_DATABASE_URL`，PostgreSQL pytest 用例保持跳过。
 
 本轮最终集成修复证据：`apps/api/tests/test_compose_contract.py` 为 `10 passed`；Worker `8 passed`；后端 `165 passed, 5 skipped`；前端 `7 files/13 tests passed`，lint/typecheck/build 退出码 0；Compose config、PowerShell 解析和 diff check 均通过。未启动服务，因此有界 E2E 和底座实时验证未执行。详见 `reports/task-8-report.md`。
+## 真实本机只读监控 MVP — 2026-09-03
+
+- [x] 新增本机 HTTP 与 Windows 服务只读目标、观测、状态和事件持久化模型，迁移版本为 `0009_monitoring_mvp`。
+- [x] 增加失败/恢复阈值、活动事件去重，以及 `unknown` 探针结果隔离，避免探针故障造成目标误报。
+- [x] 扩展 Native Worker 显式能力白名单：`monitor.http`、`monitor.windows_service`；Windows 服务仅固定调用 `sc.exe query`，禁止任意 Shell/PowerShell。
+- [x] 增加中文“监控”页面、目标登记、手动探测、周期调度和监控 API。
+- [x] 本轮代码级验证已执行；24 小时稳定性测试仍未执行，不能以短时测试结果替代长期验收。
+- [x] 本机 Compose 运行验证已通过：`0009_monitoring_mvp` 迁移成功，API `http://127.0.0.1:18230/health` 返回 `200`，Web `http://127.0.0.1:15173` 返回 `200`，未登录访问监控 API 正确返回 `401`。
+- [ ] 本次运行使用 `mock` 提供方；Ark 真实模型请求不在本轮启动链路中重复调用。监控的 24 小时稳定性、真实 Windows 服务探针和原生 Worker 长时间运行仍待单独验收。

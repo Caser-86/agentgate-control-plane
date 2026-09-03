@@ -4,7 +4,10 @@ import type {
   ApprovalRequest,
   AuditEvent,
   AuditFilters,
+  CreateMonitorTargetRequest,
   CreateRunRequest,
+  MonitorEvent,
+  MonitorTarget,
   PolicyView,
   RunDetail,
   ToolAction,
@@ -139,5 +142,20 @@ export const api = {
   },
   getMeta(): Promise<ApiMeta> {
     return request<ApiMeta>("/api/meta");
+  },
+  listMonitorTargets(): Promise<MonitorTarget[]> {
+    return request<MonitorTarget[]>("/api/monitor/targets");
+  },
+  createMonitorTarget(input: CreateMonitorTargetRequest): Promise<MonitorTarget> {
+    return request<MonitorTarget>("/api/monitor/targets", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+  probeMonitorTarget(id: string): Promise<{ task_id: string; target_id: string; status: string }> {
+    return request(`/api/monitor/targets/${encodeURIComponent(id)}/probe`, { method: "POST" });
+  },
+  listMonitorEvents(): Promise<MonitorEvent[]> {
+    return request<MonitorEvent[]>("/api/monitor/events");
   },
 };

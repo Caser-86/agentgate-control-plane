@@ -17,7 +17,7 @@ agentgate-control-plane/
 │  │  ├─ plans/  实施计划
 │  │  ├─ reports/ 验收和任务报告
 │  │  └─ progress.md 当前进度摘要
-│  ├─ architecture.md 系统架构、状态机和 Phase 0 边界
+│  ├─ architecture.md 系统架构、状态机和本地安全边界
 │  ├─ demo.md        3–5 分钟本地演示流程
 │  └─ README.md      本文件
 ├─ scripts/          Windows 本地启动、迁移、Worker 和验收脚本
@@ -56,7 +56,9 @@ agentgate-control-plane/
 
 ## 当前版本边界
 
-当前 Phase 0 的业务工具使用本地演示状态表：`get_service_health` 和 `search_logs` 只读取数据库，`restart_service` 只修改数据库中的演示状态，`rotate_api_key` 没有执行处理器。原生 Worker 只支持 `platform.self_check`，不执行任意命令、文件操作或真实 Windows 服务管理。
+Phase 0 的业务工具仍使用本地演示状态表：`get_service_health` 和 `search_logs` 只读取数据库，`restart_service` 只修改数据库中的演示状态，`rotate_api_key` 没有执行处理器。Phase 1 新增的原生 Worker 监控能力只支持回环 HTTP、固定 `sc.exe query` 和结构化结果，不执行任意命令、文件操作、服务写入或远程检查。
+
+监控功能的入口是中文 Web 页“监控”，对应 API 路径为 `/api/monitor/targets` 和 `/api/monitor/events`。目标登记、探测排队和查询都要求管理员会话；目标地址和 Windows 服务名在 API 与 Worker 两侧重复校验。
 
 外部 Agent 可以使用 `/api/v1/events`、`/api/v1/checks` 和 `/api/v1/actions`，但当前 `/api/v1/actions` 主要是策略预检接口，返回决定不等于已经进入执行队列。扩展真实执行能力时，必须同步修改工具登记、策略、Worker capability、迁移、测试和架构文档。
 
@@ -82,7 +84,7 @@ agentgate-control-plane/
 
 ## 维护建议
 
-- 先读根目录 README 的“当前能力”和“项目不负责什么”，再判断需求是否超出 Phase 0 范围。
+- 先读根目录 README 的“当前能力”和“项目不负责什么”，再判断需求是否超出当前本地只读边界。
 - 修改 API 请求/响应时，同时更新 schema、路由测试、Web 客户端和文档中的接口表。
 - 修改风险策略时，同时更新工具登记表、策略页面、确定性 eval 和演示脚本。
 - 修改 Compose 或端口时，执行 `docker compose config --quiet` 和 `apps/api/tests/test_compose_contract.py`。

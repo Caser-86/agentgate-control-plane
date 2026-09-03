@@ -102,3 +102,53 @@ export interface ApiMeta {
   model: string;
   status: string;
 }
+
+export type MonitorTargetKind = "http" | "windows_service";
+export type MonitorProbeStatus = "healthy" | "failed" | "unknown";
+export type MonitorTargetHealth = "healthy" | "degraded" | "down" | "unknown";
+
+export interface MonitorEvent {
+  id: string;
+  target_id: string;
+  status: "active" | "closed";
+  reason: string;
+  failure_count: number;
+  opened_at: string;
+  updated_at: string;
+  last_failure_at: string | null;
+  closed_at: string | null;
+}
+
+export interface MonitorTarget {
+  id: string;
+  name: string;
+  kind: MonitorTargetKind;
+  endpoint: string;
+  enabled: boolean;
+  interval_seconds: number;
+  timeout_seconds: number;
+  failure_threshold: number;
+  recovery_threshold: number;
+  health: MonitorTargetHealth;
+  consecutive_failures: number;
+  consecutive_successes: number;
+  last_probe_status: MonitorProbeStatus | null;
+  last_probe_detail: string | null;
+  last_latency_ms: number | null;
+  last_probe_at: string | null;
+  next_probe_at: string;
+  created_at: string;
+  updated_at: string;
+  active_event: MonitorEvent | null;
+}
+
+export interface CreateMonitorTargetRequest {
+  name: string;
+  kind: MonitorTargetKind;
+  endpoint: string;
+  enabled?: boolean;
+  interval_seconds?: number;
+  timeout_seconds?: number;
+  failure_threshold?: number;
+  recovery_threshold?: number;
+}

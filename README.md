@@ -2,7 +2,7 @@
 
 AgentGate 是一个面向本机运行的 AI Agent 操作治理平台。它把 Agent 的“想做什么”与系统的“允许做什么、是否需要人工批准、执行后发生了什么”分开管理。
 
-> 当前版本：Phase 0，本地控制流与安全边界演示
+> 当前版本：Phase 1，本地控制流与只读监控 MVP
 >
 > 当前默认模型：`mock` 确定性提供方
 >
@@ -49,6 +49,7 @@ AgentGate 是一个面向本机运行的 AI Agent 操作治理平台。它把 Ag
 - 高风险操作和未知工具默认拒绝。
 - 运行状态、审批决定、工具结果和审计事件保存到 PostgreSQL。
 - 运行中断后，可以根据检查点和持久化队列继续处理。
+- 可以通过原生 Worker 只读检查本机 HTTP 地址和 Windows 服务，并按失败/恢复阈值生成事件。
 - 审计接口和界面会递归脱敏敏感字段。
 
 因此，AgentGate 更接近“AI Agent 的安全控制平面、审批队列和审计台”，而不是一个新的大模型聊天窗口。
@@ -59,7 +60,7 @@ AgentGate 是一个面向本机运行的 AI Agent 操作治理平台。它把 Ag
 
 - 不提供通用聊天、搜索、RAG、情报收集或报告生成。
 - 不会自动发现并监控电脑上所有 Agent；Agent 必须通过 AgentGate 的界面或 API 接入。
-- 不会在当前 Phase 0 中真正重启 Windows 服务。
+- 不会在当前版本中真正重启 Windows 服务；监控只读取服务状态。
 - 不允许任意执行 Shell、PowerShell 或其他命令。
 - 不允许任意读写文件。
 - 不会真正轮换 API 密钥或其他凭据。
@@ -99,7 +100,7 @@ flowchart TD
 | PostgreSQL | 保存运行、动作、队列、租约、审批和审计证据 |
 | `scheduler` | 回收过期租约、推动持久化任务 |
 | `control-worker` | 处理持久化控制任务 |
-| 原生 Worker | Phase 0 仅支持安全的 `platform.self_check` 协议 |
+| 原生 Worker | 支持 `platform.self_check`、本机 HTTP 和 Windows 服务只读探针 |
 
 详细状态机和事务边界见 [架构说明](docs/architecture.md)。
 
@@ -114,6 +115,7 @@ flowchart TD
 | `运行` | 创建 Agent 运行、查看状态、打开运行详情和审批动作 |
 | `策略` | 查看已登记工具、风险等级、只读属性和策略决定 |
 | `审计` | 按运行 ID、执行者或事件类型筛选审计事件，并导出 JSON |
+| `监控` | 登记本机 HTTP/Windows 服务，查看健康状态、探测结果和活动事件 |
 
 界面默认使用中文；工具名、状态值和事件类型会同时保留必要的英文代码，便于与 API、日志和测试对应。
 
@@ -127,7 +129,20 @@ flowchart TD
 | `rotate_api_key` | 高 | 否 | 拒绝 | 永远不会在本地演示中执行 |
 | `platform.self_check` | 低 | 是 | 自动批准 | 原生 Worker 协议自检，不执行 Shell 或文件操作 |
 
-### 4.3 运行状态
+### 4.3 本机只读监控
+
+进入“监控”页面后，可以添加两种目标：
+
+| 类型 | 填写内容 | 检查行为 |
+| --- | --- | --- |
+| HTTP 地址 | `http://127.0.0.1:8000/health` | 发送受限 HTTP 请求，只记录状态码和耗时，不保存响应正文 |
+| Windows 服务 | `AgentGateWorker` | 固定执行 `sc.exe query AgentGateWorker`，只读取服务状态 |
+
+安全限制：地址只能使用 `localhost`、`127.0.0.1` 或 `::1`；服务名只能使用字母、数字、点、下划线和短横线。间隔为 5 秒至 24 小时，超时为 1 至 30 秒。系统不会执行任意 Shell/PowerShell，也不会自动重启服务。
+
+失败达到“失败阈值”后，目标显示“故障”并只创建一个活动事件；恢复达到“恢复阈值”后自动关闭事件。探针自身无法可靠执行时显示“未知”，不会把目标误报为故障。
+
+### 4.4 运行状态
 
 一次运行可能经过以下状态：
 
@@ -416,6 +431,10 @@ token 创建接口是管理员接口 `POST /api/auth/tokens`，需要管理员�
 | `POST` | `/api/v1/checks` | `propose:checks` | 提交只读控制检查 |
 | `GET` | `/api/v1/checks/{id}` | `propose:checks` | 查询检查任务状态 |
 | `POST` | `/api/v1/actions` | `propose:actions` | 预检动作策略 |
+| `GET` | `/api/monitor/targets` | 管理员会话 | 查看监控目标 |
+| `POST` | `/api/monitor/targets` | 管理员会话 + CSRF | 登记本机只读监控目标 |
+| `POST` | `/api/monitor/targets/{id}/probe` | 管理员会话 + CSRF | 手动排队一次探测 |
+| `GET` | `/api/monitor/events` | 管理员会话 | 查看监控事件 |
 | `GET` | `/api/auth/status` | 无 | 查询初始化/登录状态 |
 | `GET` | `/health` | 无 | API 存活检查 |
 
@@ -461,7 +480,7 @@ Invoke-RestMethod `
 }
 ```
 
-提交 Phase 0 自检：
+提交平台自检：
 
 ```json
 {
@@ -472,7 +491,7 @@ Invoke-RestMethod `
 }
 ```
 
-自检必须使用 `target: local` 且参数为空。其他检查类型目前会被拒绝，因为 Phase 0 只开放安全自检协议。
+自检必须使用 `target: local` 且参数为空。HTTP 和 Windows 服务监控由管理员控制台登记，不能通过外部 Agent 绕过本机目标校验。
 
 ## 十一、原生 Worker
 
@@ -483,14 +502,14 @@ Invoke-RestMethod `
 - 使用 enrollment token 注册到本地 API。
 - 保存 Worker 凭据和本地 journal。
 - 发送 heartbeat。
-- 领取 `platform.self_check` 任务。
-- 把安全自检结果报告回控制平面。
+- 领取 `platform.self_check`、`monitor.http` 和 `monitor.windows_service` 任务。
+- 把安全自检或结构化探测结果报告回控制平面。
 
 当前 Worker 不支持：
 
 - 任意 Shell 或 PowerShell。
 - 任意文件读写。
-- 任意 Windows 服务管理。
+- 启动、停止、重启或修改 Windows 服务。
 - 任意凭据读取或轮换。
 - 远程 API 地址。
 
@@ -539,7 +558,7 @@ Set-Location 'D:\LLM Files\files\agentgate-control-plane\apps\api'
 .\.venv\Scripts\python.exe -m app.evals.runner
 ```
 
-确定性评测包含 6 个场景，每个场景有 4 个评分器：结果、轨迹、策略合规和幂等性。全部通过时应看到 6 个场景均为 `4/4 PASS`，并生成被 `.gitignore` 排除的 `apps/api/eval-results.json`。
+确定性评测包含 6 个场景，每个场景有 4 个评分器：结果、轨迹、策略合规和幂等性。全部通过时应看到 6 个场景均为 `4/4 PASS`，并生成被 `.gitignore` 排除的 `apps/api/eval-results.json`。监控功能的 API、状态机和 Worker 探针测试也包含在全量测试中。
 
 ### 12.4 Web 检查
 
@@ -676,7 +695,8 @@ agentgate-control-plane/
 │  │  ├─ app/evals/        确定性评测器
 │  │  ├─ app/llm/          mock 和 OpenAI-compatible 模型适配器
 │  │  ├─ app/processes/    scheduler 与 control-worker
-│  │  ├─ app/services/     AgentRunner、审批、执行器、审计和事件流
+│  │  ├─ app/monitoring/   监控目标、观测、事件模型和枚举
+│  │  ├─ app/services/     AgentRunner、审批、执行器、监控、审计和事件流
 │  │  ├─ app/tools/        工具定义、参数模型、登记表和处理器
 │  │  ├─ migrations/       Alembic 数据库迁移
 │  │  └─ tests/            API、策略、队列、认证和安全测试
@@ -685,7 +705,7 @@ agentgate-control-plane/
 │  │  ├─ src/auth/         登录和会话状态
 │  │  ├─ src/components/   页面组件和时间线
 │  │  ├─ src/i18n/         中文界面文案和格式化函数
-│  │  ├─ src/pages/        运行、策略、审计和登录页面
+│  │  ├─ src/pages/        运行、策略、监控、审计和登录页面
 │  │  ├─ src/styles.css    控制台样式
 │  │  ├─ src/**/*.test.*   Web 单元测试
 │  │  └─ e2e/              Playwright 浏览器测试
@@ -737,14 +757,14 @@ agentgate-control-plane/
 
 当前建议按以下顺序演进：
 
-1. **Phase 0：本地安全演示**（当前）
+1. **Phase 0：本地安全演示**（已完成）
    - 完成登录、策略、审批、持久化队列、审计和 mock 流程。
    - 只允许安全的本地自检协议。
 
-2. **Phase 1：真实本机 Worker**
-   - 在显式白名单中接入有限的 Windows 服务检查和重启。
-   - 为每种高权限动作增加 capability、目标约束、超时和回滚策略。
-   - 继续禁止任意 Shell 和任意路径操作。
+2. **Phase 1：真实本机只读监控**（当前已完成 MVP）
+   - 已接入本机 HTTP 和 Windows 服务只读探针、周期调度、失败/恢复阈值和事件去重。
+   - 已提供中文监控页面、目标登记 API、探测结果和审计记录。
+   - 下一步应补充 24 小时稳定性验收、监控历史聚合和告警通知，但不能先放开写入型动作。
 
 3. **Phase 2：外部 Agent 统一接入**
    - 把外部 action proposal 接入持久化审批队列。

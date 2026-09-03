@@ -15,14 +15,22 @@ from app.control.enums import TaskKind, TaskOutcome, TaskStatus, WorkerStatus
 from app.control.models import ControlTask, WorkerExecutionGrant, WorkerRegistration
 from app.control.repositories import append_outbox_event, claim_next_task, complete_task
 from app.models import utc_now
+from app.monitoring.enums import (
+    HTTP_MONITOR_CAPABILITY,
+    WINDOWS_SERVICE_MONITOR_CAPABILITY,
+    ProbeStatus,
+)
 from app.repositories import AuditRepository
 from app.services.audit import AuditService
+from app.services.monitoring import validate_http_endpoint, validate_windows_service_name
 
 PROTOCOL_VERSION = "1.0"
 SELF_CHECK_CAPABILITY = "platform.self_check"
-SUPPORTED_CAPABILITIES = frozenset({SELF_CHECK_CAPABILITY})
+SUPPORTED_CAPABILITIES = frozenset(
+    {SELF_CHECK_CAPABILITY, HTTP_MONITOR_CAPABILITY, WINDOWS_SERVICE_MONITOR_CAPABILITY}
+)
 MAX_RESULT_BYTES = 4096
-MAX_CAPABILITIES = 1
+MAX_CAPABILITIES = 3
 SELF_CHECK_RESULT_KEYS = frozenset(
     {"status", "detail", "worker_version", "protocol_version", "capabilities"}
 )
@@ -48,7 +56,7 @@ class RegisterWorkerRequest(_ProtocolModel):
     @field_validator("capabilities")
     @classmethod
     def validate_capabilities(cls, value: list[str]) -> list[str]:
-        if len(set(value)) != len(value) or set(value) != SUPPORTED_CAPABILITIES:
+        if len(set(value)) != len(value) or not set(value) <= SUPPORTED_CAPABILITIES:
             raise ValueError("unsupported_worker_capability")
         return value
 
@@ -134,6 +142,40 @@ def sanitize_self_check_result(result: dict[str, object]) -> dict[str, object]:
     return safe
 
 
+def sanitize_monitor_result(result: dict[str, object]) -> dict[str, object]:
+    if not isinstance(result, dict):
+        raise WorkerProtocolError(422, "invalid_result")
+    status = result.get("status")
+    if not isinstance(status, str) or status not in {item.value for item in ProbeStatus}:
+        raise WorkerProtocolError(422, "invalid_result")
+    safe: dict[str, object] = {"status": status}
+    detail = result.get("detail")
+    if isinstance(detail, str):
+        safe["detail"] = detail[:512]
+    latency_ms = result.get("latency_ms")
+    if (
+        isinstance(latency_ms, int)
+        and not isinstance(latency_ms, bool)
+        and 0 <= latency_ms <= 60_000
+    ):
+        safe["latency_ms"] = latency_ms
+    encoded = _canonical_json(safe)
+    if len(encoded) > MAX_RESULT_BYTES:
+        raise WorkerProtocolError(422, "result_too_large")
+    return safe
+
+
+def sanitize_result_for_task(task: ControlTask, result: dict[str, object]) -> dict[str, object]:
+    if task.capability == SELF_CHECK_CAPABILITY:
+        return sanitize_self_check_result(result)
+    if task.capability in {
+        HTTP_MONITOR_CAPABILITY,
+        WINDOWS_SERVICE_MONITOR_CAPABILITY,
+    }:
+        return sanitize_monitor_result(result)
+    raise WorkerProtocolError(403, "unsupported_worker_capability")
+
+
 def register_worker(
     session: Session, request: RegisterWorkerRequest, enrollment_token: str
 ) -> RegisteredWorker:
@@ -206,11 +248,45 @@ def heartbeat(session: Session, *, worker_id: UUID, protocol_version: str) -> No
     session.commit()
 
 
-def _task_is_safe_self_check(task: ControlTask) -> bool:
+def _task_is_safe_monitor(task: ControlTask) -> bool:
+    payload = task.payload
+    expected_keys = {"task_type", "target_id", "endpoint", "timeout_seconds"}
+    if (
+        task.kind != TaskKind.CONTROL
+        or not isinstance(payload, dict)
+        or set(payload) != expected_keys
+        or payload.get("task_type") != task.capability
+        or not isinstance(payload.get("target_id"), str)
+        or not isinstance(payload.get("timeout_seconds"), int)
+        or isinstance(payload.get("timeout_seconds"), bool)
+    ):
+        return False
+    target_id_value = cast(str, payload["target_id"])
+    timeout_value = cast(int, payload["timeout_seconds"])
+    if not 1 <= timeout_value <= 30:
+        return False
+    try:
+        UUID(target_id_value)
+        if task.capability == HTTP_MONITOR_CAPABILITY:
+            validate_http_endpoint(str(payload["endpoint"]))
+        elif task.capability == WINDOWS_SERVICE_MONITOR_CAPABILITY:
+            validate_windows_service_name(str(payload["endpoint"]))
+        else:
+            return False
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
+def _task_is_safe(task: ControlTask) -> bool:
     return (
         task.kind == TaskKind.CONTROL
-        and task.capability == SELF_CHECK_CAPABILITY
-        and task.payload == {"task_type": SELF_CHECK_CAPABILITY}
+        and (
+            task.capability == SELF_CHECK_CAPABILITY
+            and task.payload == {"task_type": SELF_CHECK_CAPABILITY}
+            or task.capability in {HTTP_MONITOR_CAPABILITY, WINDOWS_SERVICE_MONITOR_CAPABILITY}
+            and _task_is_safe_monitor(task)
+        )
     )
 
 
@@ -229,7 +305,7 @@ def claim_worker_task(
     if task is None:
         session.commit()
         return None
-    if not _task_is_safe_self_check(task):
+    if not _task_is_safe(task):
         task.status = TaskStatus.MANUAL_REVIEW
         task.completed_at = utc_now()
         task.lease_owner_id = None
@@ -257,7 +333,7 @@ def _owned_task(
     session: Session, *, task_id: UUID, worker_id: UUID, request_digest_value: str
 ) -> ControlTask:
     task = session.get(ControlTask, task_id)
-    if task is None or not _task_is_safe_self_check(task):
+    if task is None or not _task_is_safe(task):
         raise WorkerProtocolError(403, "task_not_authorized")
     if task.lease_owner_id != worker_id or task.lease_expires_at is None:
         raise WorkerProtocolError(403, "lease_not_owned")
@@ -344,8 +420,10 @@ def complete_worker_task(
     if worker is None:
         raise WorkerProtocolError(401, "authentication_required")
     _require_protocol(protocol_version, worker.protocol_version)
-    safe_result = sanitize_self_check_result(result)
     task = session.get(ControlTask, task_id)
+    if task is None:
+        raise WorkerProtocolError(403, "task_not_authorized")
+    safe_result = sanitize_result_for_task(task, result)
     if task is not None and task.status == TaskStatus.SUCCEEDED:
         _grant_for_completion(
             session, task_id=task_id, worker_id=worker_id,
@@ -377,6 +455,25 @@ def complete_worker_task(
         )
     except ValueError as error:
         raise WorkerProtocolError(403, "task_not_completable") from error
+    if completed.capability in {
+        HTTP_MONITOR_CAPABILITY,
+        WINDOWS_SERVICE_MONITOR_CAPABILITY,
+    }:
+        target_id = completed.payload.get("target_id")
+        if not isinstance(target_id, str):
+            raise WorkerProtocolError(422, "invalid_monitor_target")
+        try:
+            from app.services.monitoring import apply_probe_result
+
+            apply_probe_result(
+                session,
+                target_id=UUID(target_id),
+                result=safe_result,
+                observed_at=completed.completed_at,
+                task_id=completed.id,
+            )
+        except (TypeError, ValueError) as error:
+            raise WorkerProtocolError(422, "invalid_monitor_target") from error
     grant.completed_at = utc_now()
     session.add(grant)
     append_outbox_event(

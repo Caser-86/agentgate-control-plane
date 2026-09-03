@@ -6,6 +6,7 @@ import { PoliciesPage } from "./pages/PoliciesPage";
 import { LoginPage } from "./pages/LoginPage";
 import { RunDetailPage } from "./pages/RunDetailPage";
 import { RunsPage } from "./pages/RunsPage";
+import { TargetsPage } from "./pages/TargetsPage";
 
 function App() {
   return (
@@ -18,6 +19,7 @@ function App() {
             <Route path="runs/:runId" element={<RunDetailPage />} />
             <Route path="policies" element={<PoliciesPage />} />
             <Route path="audit" element={<AuditPage />} />
+            <Route path="monitor" element={<TargetsPage />} />
           </Route>
         </Routes>
       </AuthProvider>

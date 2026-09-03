@@ -116,6 +116,6 @@ sequenceDiagram
 
 ## 本地演示限制与生产演进路径
 
-Phase 0 刻意限制为本地运行：Compose 将 Web/API 绑定到回环地址，PostgreSQL 不发布宿主机端口，也不存在真实宿主机动作。API 提供不包含密钥的健康和自检数据；scheduler 负责恢复持久化租约，control-worker 处理持久化控制任务。原生 Windows Worker 可以在 Docker 外使用，但仅支持安全的 `platform.self_check` 协议。真实服务重启、任意 Shell/PowerShell、文件写入和密钥操作属于后续阶段，当前尚未实现。
+当前版本仍刻意限制为本地运行：Compose 将 Web/API 绑定到回环地址，PostgreSQL 不发布宿主机端口。scheduler 负责恢复持久化租约并为到期监控目标排队，control-worker 处理持久化控制任务；原生 Windows Worker 处理 `platform.self_check`、本机 HTTP 和 Windows 服务只读探针。监控只允许回环 HTTP 地址和安全格式的服务名，不保存响应正文，也不执行任意 Shell/PowerShell。真实服务重启、文件写入和密钥操作仍未实现。
 
 本地端口约定：`AGENTGATE_API_PORT` 默认是 `8000`，`AGENTGATE_WEB_PORT` 默认是 `5173`。Compose 只发布 `127.0.0.1:<port>`；API 根据 Web 端口生成 CORS 来源，Vite 根据 API 端口生成开发代理和 API 基地址，构建后的 Web 容器也使用同一份 Compose 解析出的运行时 API 地址。只支持 `localhost`/`127.0.0.1` 目标。

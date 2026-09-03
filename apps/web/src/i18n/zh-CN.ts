@@ -14,6 +14,10 @@ const statusLabels: Record<string, string> = {
   denied: "已拒绝",
   succeeded: "执行成功",
   expired: "已过期",
+  healthy: "健康",
+  degraded: "降级",
+  down: "故障",
+  unknown: "未知",
 };
 
 const riskLabels: Record<string, string> = {
@@ -59,6 +63,10 @@ const eventLabels: Record<string, string> = {
   "tool.succeeded": "工具执行成功",
   "tool.denied": "工具执行已拒绝",
   "tool.failed": "工具执行失败",
+  "monitor.target.created": "监控目标已创建",
+  "monitor.probe.recorded": "监控探测已记录",
+  "monitor.event.opened": "监控故障已打开",
+  "monitor.event.closed": "监控故障已恢复",
 };
 
 const actorLabels: Record<string, string> = {

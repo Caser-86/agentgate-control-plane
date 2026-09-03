@@ -1,3 +1,3 @@
-"""Native AgentGate Worker limited to safe Phase 0 self-checks."""
+"""Native AgentGate Worker with explicitly allowlisted read-only capabilities."""
 
 __version__ = "0.1.0"

@@ -40,6 +40,37 @@ describe("api client", () => {
     expect(resolveApiBaseUrl({ apiBaseUrl: "   \t\n" })).toBe("");
   });
 
+  it("calls the Chinese monitoring API endpoints", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn()
+        .mockResolvedValueOnce(new Response(JSON.stringify([]), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ id: "target-1" }), { status: 201 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ task_id: "task-1" }), { status: 202 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify([]), { status: 200 })),
+    );
+
+    await api.listMonitorTargets();
+    await api.createMonitorTarget({
+      name: "本地 API",
+      kind: "http",
+      endpoint: "http://127.0.0.1:8000/health",
+    });
+    await api.probeMonitorTarget("target-1");
+    await api.listMonitorEvents();
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      "http://localhost:8000/api/monitor/targets",
+      expect.anything(),
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      3,
+      "http://localhost:8000/api/monitor/targets/target-1/probe",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
   it.each([
     "https://example.com",
     "http://user:pass@localhost:8000",

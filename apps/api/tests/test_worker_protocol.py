@@ -12,8 +12,8 @@ from app.control.models import ControlTask, OutboxEvent, WorkerExecutionGrant, W
 from app.control.repositories import enqueue_task
 from app.models import utc_now
 from app.services.worker_protocol import (
-    RegisterWorkerRequest,
     RegisteredWorker,
+    RegisterWorkerRequest,
     WorkerProtocolError,
     register_worker,
 )

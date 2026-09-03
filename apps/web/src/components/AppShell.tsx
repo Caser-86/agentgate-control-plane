@@ -39,6 +39,7 @@ export function AppShell() {
           <NavLink to="/" end className={({ isActive }) => isActive ? "active" : ""}>运行 <span>01</span></NavLink>
           <NavLink to="/policies" className={({ isActive }) => isActive ? "active" : ""}>策略 <span>02</span></NavLink>
           <NavLink to="/audit" className={({ isActive }) => isActive ? "active" : ""}>审计 <span>03</span></NavLink>
+          <NavLink to="/monitor" className={({ isActive }) => isActive ? "active" : ""}>监控 <span>04</span></NavLink>
         </nav>
         <div className="sidebar-footer">
           <span className="nav-label">运行环境</span>

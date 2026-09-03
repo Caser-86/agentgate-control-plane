@@ -3,14 +3,26 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Protocol
 from urllib.parse import urlsplit
+from uuid import UUID
 
 import httpx
 
 from agentgate_worker.journal import WorkerJournal
+from agentgate_worker.probes import (
+    probe_http,
+    probe_windows_service,
+    validate_http_target,
+    validate_windows_service_name,
+)
 from agentgate_worker.vault import WorkerCredentials, WorkerVault
 
 PROTOCOL_VERSION = "1.0"
 SELF_CHECK_CAPABILITY = "platform.self_check"
+HTTP_MONITOR_CAPABILITY = "monitor.http"
+WINDOWS_SERVICE_MONITOR_CAPABILITY = "monitor.windows_service"
+SUPPORTED_CAPABILITIES = frozenset(
+    {SELF_CHECK_CAPABILITY, HTTP_MONITOR_CAPABILITY, WINDOWS_SERVICE_MONITOR_CAPABILITY}
+)
 SELF_CHECK_RESULT_KEYS = frozenset(
     {"status", "detail", "worker_version", "protocol_version", "capabilities"}
 )
@@ -67,6 +79,64 @@ def sanitize_self_check_result(result: dict[str, object]) -> dict[str, object]:
     if "status" not in safe:
         raise WorkerProtocolError("Worker self-check result is missing status")
     return safe
+
+
+def sanitize_monitor_result(result: dict[str, object]) -> dict[str, object]:
+    if not isinstance(result, dict):
+        raise WorkerProtocolError("Worker probe result must be an object")
+    status = result.get("status")
+    if status not in {"healthy", "failed", "unknown"}:
+        raise WorkerProtocolError("Worker probe result has an unsupported status")
+    safe: dict[str, object] = {"status": status}
+    detail = result.get("detail")
+    if isinstance(detail, str):
+        safe["detail"] = detail[:512]
+    latency_ms = result.get("latency_ms")
+    if (
+        isinstance(latency_ms, int)
+        and not isinstance(latency_ms, bool)
+        and 0 <= latency_ms <= 60_000
+    ):
+        safe["latency_ms"] = latency_ms
+    return safe
+
+
+def _safe_task_payload(payload: object) -> dict[str, object]:
+    if not isinstance(payload, dict):
+        raise WorkerProtocolError("Worker received an unsafe task payload")
+    task_type = payload.get("task_type")
+    if task_type == SELF_CHECK_CAPABILITY:
+        if payload != {"task_type": SELF_CHECK_CAPABILITY}:
+            raise WorkerProtocolError("Worker received an unsafe task payload")
+        return payload
+    expected = {"task_type", "target_id", "endpoint", "timeout_seconds"}
+    if task_type not in {HTTP_MONITOR_CAPABILITY, WINDOWS_SERVICE_MONITOR_CAPABILITY}:
+        raise WorkerProtocolError("Worker received an unsupported task payload")
+    if set(payload) != expected or not isinstance(payload.get("target_id"), str):
+        raise WorkerProtocolError("Worker received an unsafe task payload")
+    try:
+        UUID(payload["target_id"])
+        timeout_seconds = payload["timeout_seconds"]
+        if (
+            isinstance(timeout_seconds, bool)
+            or not isinstance(timeout_seconds, int)
+            or not 1 <= timeout_seconds <= 30
+        ):
+            raise ValueError
+        if task_type == HTTP_MONITOR_CAPABILITY:
+            validate_http_target(str(payload["endpoint"]))
+        else:
+            validate_windows_service_name(str(payload["endpoint"]))
+    except (TypeError, ValueError) as error:
+        raise WorkerProtocolError("Worker received an unsafe task payload") from error
+    return payload
+
+
+def sanitize_result_for_grant(grant: "TaskGrant", result: dict[str, object]) -> dict[str, object]:
+    payload = getattr(grant, "payload", {"task_type": SELF_CHECK_CAPABILITY})
+    if payload.get("task_type") == SELF_CHECK_CAPABILITY:
+        return sanitize_self_check_result(result)
+    return sanitize_monitor_result(result)
 
 
 class Transport(Protocol):
@@ -127,8 +197,8 @@ class WorkerClient:
         capabilities: set[str],
         transport: Transport | None = None,
     ) -> None:
-        if capabilities != {SELF_CHECK_CAPABILITY}:
-            raise ValueError("Phase 0 Worker only supports platform.self_check")
+        if not capabilities or not capabilities <= SUPPORTED_CAPABILITIES:
+            raise ValueError("Worker capabilities contain an unsupported capability")
         validated_base_url = validate_api_url(base_url)
         self.vault = vault
         self.journal = journal
@@ -197,9 +267,7 @@ class WorkerClient:
         if not response:
             return None
         try:
-            payload = response["payload"]
-            if not isinstance(payload, dict) or payload != {"task_type": SELF_CHECK_CAPABILITY}:
-                raise WorkerProtocolError("Worker received an unsafe task payload")
+            payload = _safe_task_payload(response["payload"])
             lease = datetime.fromisoformat(str(response["lease_expires_at"]))
             if lease.tzinfo is None:
                 lease = lease.replace(tzinfo=UTC)
@@ -222,7 +290,7 @@ class WorkerClient:
         self.journal.record_started(grant.task_id, grant.request_digest, grant.lease_expires_at)
 
     def complete(self, grant: TaskGrant, result: dict[str, object]) -> None:
-        safe_result = sanitize_self_check_result(result)
+        safe_result = sanitize_result_for_grant(grant, result)
         self.journal.record_result(grant.task_id, safe_result)
         self._request(
             "POST",
@@ -234,7 +302,11 @@ class WorkerClient:
     def recover_pending_reports(self) -> int:
         recovered = 0
         for task_id, request_digest, result in self.journal.pending_reports():
-            safe_result = sanitize_self_check_result(result)
+            safe_result = (
+                sanitize_monitor_result(result)
+                if result.get("status") in {"healthy", "failed", "unknown"}
+                else sanitize_self_check_result(result)
+            )
             self._request(
                 "POST",
                 f"/api/v1/worker/tasks/{task_id}/report",
@@ -252,3 +324,17 @@ class WorkerClient:
             "protocol_version": PROTOCOL_VERSION,
             "capabilities": sorted(self.capabilities),
         }
+
+    def probe_result(self, grant: TaskGrant) -> dict[str, object]:
+        task_type = grant.payload.get("task_type")
+        endpoint = grant.payload.get("endpoint")
+        timeout_seconds = grant.payload.get("timeout_seconds")
+        if not isinstance(endpoint, str) or not isinstance(timeout_seconds, int):
+            raise WorkerProtocolError("Worker received an unsafe task payload")
+        if task_type == HTTP_MONITOR_CAPABILITY:
+            return probe_http(endpoint, timeout_seconds=timeout_seconds)
+        if task_type == WINDOWS_SERVICE_MONITOR_CAPABILITY:
+            return probe_windows_service(endpoint)
+        if task_type == SELF_CHECK_CAPABILITY:
+            return self.self_check_result()
+        raise WorkerProtocolError("Worker received an unsupported task payload")

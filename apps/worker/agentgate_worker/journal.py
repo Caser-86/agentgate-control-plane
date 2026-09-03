@@ -8,7 +8,7 @@ from pathlib import Path
 MAX_JOURNAL_RESULT_BYTES = 4096
 REDACTED = "***REDACTED***"
 ALLOWED_RESULT_KEYS = frozenset(
-    {"status", "worker_version", "protocol_version", "capabilities", "detail"}
+    {"status", "worker_version", "protocol_version", "capabilities", "detail", "latency_ms"}
 )
 SENSITIVE_KEY_PARTS = frozenset(
     {"apikey", "authorization", "clientsecret", "password", "passwordhash", "secret", "token"}
@@ -50,6 +50,10 @@ def _bounded_result(result: dict[str, object], max_result_bytes: int) -> dict[st
         and (
             key not in {"status", "worker_version", "protocol_version", "detail"}
             or isinstance(value, str)
+        )
+        and (
+            key != "latency_ms"
+            or isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 60_000
         )
     }
     if "status" not in bounded:

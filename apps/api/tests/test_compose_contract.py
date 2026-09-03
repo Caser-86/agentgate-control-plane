@@ -108,7 +108,9 @@ def test_local_scripts_run_migrations_before_services_and_use_npm_cmd() -> None:
     start_script = (REPO_ROOT / "scripts/start-local.ps1").read_text(encoding="utf-8")
     assert "migrate-local.ps1" in start_script
     assert "npm.cmd" in start_script
-    assert start_script.index("migrate-local.ps1") < start_script.index("docker compose up -d --build api")
+    assert start_script.index("migrate-local.ps1") < start_script.index(
+        "docker compose up -d --build api"
+    )
     assert "docker compose up -d --build api scheduler control-worker web" in start_script
     migrate_script = (REPO_ROOT / "scripts/migrate-local.ps1").read_text(encoding="utf-8")
     assert "docker compose run --rm --build migrate" in migrate_script
