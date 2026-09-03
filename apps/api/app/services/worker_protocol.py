@@ -207,6 +207,7 @@ def register_worker(
                 ),
             )
             .values(revoked_at=now)
+            .execution_options(synchronize_session=False)
         )
         if consumed.rowcount != 1:
             raise WorkerProtocolError(401, "invalid_enrollment_token")

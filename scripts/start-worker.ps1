@@ -69,8 +69,11 @@ if ($LASTEXITCODE -ne 0) {
 }
 if (-not $apiUrlSupplied) { $ApiUrl = "http://127.0.0.1:$ApiPort" }
 Push-Location $workerRoot
+$workerExitCode = 0
 try {
     & $python -m agentgate_worker.main --api-url $ApiUrl --state-dir $StateDir --enrollment-token $EnrollmentToken
+    $workerExitCode = $LASTEXITCODE
 } finally {
     Pop-Location
 }
+exit $workerExitCode

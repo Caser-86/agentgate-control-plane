@@ -15,5 +15,5 @@ if ($LASTEXITCODE -eq 0 -or ($conflict -join "`n") -notmatch "conflicts with exp
 $remote = & pwsh -NoProfile -File $worker -ApiUrl "https://example.com:18000" 2>&1
 if ($LASTEXITCODE -eq 0 -or ($remote -join "`n") -notmatch "Remote API targets are not supported") { throw "Remote API URL was not rejected." }
 $matching = & pwsh -NoProfile -File $worker -ApiUrl "http://127.0.0.1:18000" -ApiPort 18000 2>&1
-if (($matching -join "`n") -notmatch "one-time worker enrollment token is required") { throw "Matching ApiUrl/ApiPort did not proceed to worker startup." }
+if ($LASTEXITCODE -eq 0 -or ($matching -join "`n") -notmatch "one-time worker enrollment token is required") { throw "Matching ApiUrl/ApiPort did not proceed to worker startup with a failure exit code." }
 Write-Output "start-worker contract checks passed"

@@ -38,6 +38,16 @@ def test_http_probe_marks_non_2xx_and_does_not_follow_redirect() -> None:
     assert len(calls) == 1
 
 
+def test_http_probe_marks_connection_failure_as_failed() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused", request=request)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=False)
+    result = probe_http("http://127.0.0.1:8000/health", client=client)
+
+    assert result["status"] == "failed"
+
+
 @pytest.mark.parametrize(
     "endpoint",
     [

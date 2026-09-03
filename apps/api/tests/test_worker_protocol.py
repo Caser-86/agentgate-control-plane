@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+from datetime import timedelta
 from uuid import UUID
 
 from fastapi.testclient import TestClient
@@ -122,6 +123,37 @@ def test_registration_issues_distinct_worker_token_and_consumes_enrollment(
         assert registration.token_digest != identity["token"]
         assert enrollment is not None
         assert enrollment.revoked_at is not None
+
+
+def test_registration_with_expiring_enrollment_token_works_after_sqlite_roundtrip(
+    auth_client: tuple[TestClient, Engine, object],
+) -> None:
+    """SQLite returns persisted aware datetimes as naive values during registration."""
+    client, engine, _ = auth_client
+    enrollment_token = "enrollment-token-with-expiry"
+    with Session(engine) as session:
+        session.add(
+            ClientToken(
+                name="worker-enrollment-expiring",
+                token_digest=digest_secret(enrollment_token),
+                scopes=["worker:enroll"],
+                expires_at=utc_now() + timedelta(hours=1),
+            )
+        )
+        session.commit()
+
+    response = client.post(
+        "/api/v1/worker/register",
+        headers={"Authorization": f"Bearer {enrollment_token}"},
+        json={
+            "name": "expiring-worker",
+            "version": "0.1.0",
+            "protocol_version": PROTOCOL_VERSION,
+            "capabilities": [SELF_CHECK_CAPABILITY],
+        },
+    )
+
+    assert response.status_code == 201
 
 
 def test_concurrent_registration_consumes_enrollment_token_once(

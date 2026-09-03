@@ -84,6 +84,12 @@ def probe_http(
             "detail": "HTTP 请求超时",
             "latency_ms": max(0, int((time.perf_counter() - started_at) * 1000)),
         }
+    except httpx.RequestError:
+        return {
+            "status": "failed",
+            "detail": "HTTP 请求失败",
+            "latency_ms": max(0, int((time.perf_counter() - started_at) * 1000)),
+        }
     except httpx.HTTPError:
         return {"status": "unknown", "detail": "HTTP 探针无法执行"}
     finally:
