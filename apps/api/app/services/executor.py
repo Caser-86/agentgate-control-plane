@@ -49,6 +49,8 @@ class ToolExecutor:
         self.before_side_effect = before_side_effect
 
     def _emit(self, action: ToolAction) -> None:
+        if action.run_id is None:
+            raise ExecutionError("tool action is not attached to an agent run")
         append_outbox_event(
             self.session,
             event_type="action.updated",

@@ -15,8 +15,9 @@ from app.auth.security import digest_secret, new_secret
 from app.control.enums import TaskKind, TaskOutcome, TaskStatus, WorkerStatus
 from app.control.models import ControlTask, WorkerExecutionGrant, WorkerRegistration
 from app.control.repositories import append_outbox_event, claim_next_task, complete_task
+from app.files.models import QuarantineEntry
 from app.files.security import InvalidRelativePath, normalize_relative_path
-from app.models import utc_now
+from app.models import ActionStatus, ToolAction, utc_now
 from app.monitoring.enums import (
     HTTP_MONITOR_CAPABILITY,
     WINDOWS_SERVICE_MONITOR_CAPABILITY,
@@ -232,6 +233,90 @@ def sanitize_file_result(result: dict[str, object]) -> dict[str, object]:
     if len(_canonical_json(safe)) > MAX_RESULT_BYTES:
         raise WorkerProtocolError(422, "result_too_large")
     return safe
+
+
+def _project_file_action_result(
+    session: Session, task: ControlTask, result: dict[str, object], worker_id: UUID
+) -> None:
+    try:
+        action_id = UUID(str(task.payload["action_id"]))
+    except (KeyError, TypeError, ValueError) as error:
+        raise WorkerProtocolError(422, "invalid_file_action") from error
+    action = session.get(ToolAction, action_id)
+    if action is None or action.tool_name != task.capability:
+        raise WorkerProtocolError(422, "invalid_file_action")
+
+    succeeded = result["status"] == "succeeded"
+    action.status = ActionStatus.SUCCEEDED if succeeded else ActionStatus.FAILED
+    action.result_json = json.dumps(result, ensure_ascii=False, sort_keys=True)
+    action.executed_at = utc_now()
+    session.add(action)
+
+    if succeeded and task.capability == "file.quarantine.v1":
+        try:
+            entry_id = UUID(str(result["quarantine_entry_id"]))
+            quarantine_relative_path = str(result["quarantine_relative_path"])
+            workspace_id = UUID(str(task.payload["workspace_id"]))
+            relative_path = normalize_relative_path(str(task.payload["relative_path"]))
+            content_sha256 = str(result["content_sha256"])
+            size_bytes = result["size_bytes"]
+            if not isinstance(size_bytes, int) or isinstance(size_bytes, bool) or size_bytes < 0:
+                raise ValueError
+            if not re.fullmatch(r"[0-9a-f]{64}", content_sha256):
+                raise ValueError
+        except (KeyError, TypeError, ValueError) as error:
+            raise WorkerProtocolError(422, "invalid_file_action") from error
+        existing = session.get(QuarantineEntry, entry_id)
+        if existing is None:
+            session.add(
+                QuarantineEntry(
+                    id=entry_id,
+                    workspace_id=workspace_id,
+                    action_id=action.id,
+                    original_relative_path=relative_path,
+                    quarantine_relative_path=quarantine_relative_path,
+                    content_sha256=content_sha256,
+                    size_bytes=size_bytes,
+                    status="quarantined",
+                )
+            )
+        elif (
+            existing.action_id != action.id
+            or existing.workspace_id != workspace_id
+            or existing.content_sha256 != content_sha256
+            or existing.size_bytes != size_bytes
+        ):
+            raise WorkerProtocolError(409, "quarantine_entry_conflict")
+    elif succeeded and task.capability == "file.restore.v1":
+        try:
+            entry_id = UUID(str(task.payload["quarantine_entry_id"]))
+        except (KeyError, TypeError, ValueError) as error:
+            raise WorkerProtocolError(422, "invalid_file_action") from error
+        entry = session.get(QuarantineEntry, entry_id)
+        if entry is None or entry.action_id == action.id:
+            raise WorkerProtocolError(422, "quarantine_entry_not_found")
+        entry.status = "restored"
+        entry.restored_at = utc_now()
+        session.add(entry)
+
+    append_outbox_event(
+        session,
+        event_type="file.action.updated",
+        resource_type="tool_action",
+        resource_id=action.id,
+        payload={"action_id": str(action.id), "status": action.status.value},
+    )
+    _audit(
+        session,
+        event_type="file.action.completed",
+        worker_id=worker_id,
+        payload={
+            "action_id": str(action.id),
+            "status": action.status.value,
+            "result_kind": result.get("result_kind"),
+            "side_effect": result.get("side_effect"),
+        },
+    )
 
 
 def sanitize_result_for_task(task: ControlTask, result: dict[str, object]) -> dict[str, object]:
@@ -509,7 +594,11 @@ def complete_worker_task(
     if task is None:
         raise WorkerProtocolError(403, "task_not_authorized")
     safe_result = sanitize_result_for_task(task, result)
-    if task is not None and task.status == TaskStatus.SUCCEEDED:
+    if task is not None and task.status in {
+        TaskStatus.SUCCEEDED,
+        TaskStatus.FAILED,
+        TaskStatus.MANUAL_REVIEW,
+    }:
         _grant_for_completion(
             session, task_id=task_id, worker_id=worker_id,
             lease_version=task.lease_version, request_digest_value=request_digest_value
@@ -529,18 +618,25 @@ def complete_worker_task(
         session, task_id=task_id, worker_id=worker_id,
         lease_version=task.lease_version, request_digest_value=request_digest_value
     )
+    outcome = (
+        TaskOutcome.FAILED
+        if task.capability in FILE_CAPABILITIES and safe_result.get("status") == "failed"
+        else TaskOutcome.SUCCEEDED
+    )
     try:
         completed = complete_task(
             session,
             task_id=task_id,
             worker_id=worker_id,
             lease_version=task.lease_version,
-            outcome=TaskOutcome.SUCCEEDED,
+            outcome=outcome,
             result=safe_result,
         )
     except ValueError as error:
         raise WorkerProtocolError(403, "task_not_completable") from error
-    if completed.capability in {
+    if completed.capability in FILE_CAPABILITIES:
+        _project_file_action_result(session, completed, safe_result, worker_id)
+    elif completed.capability in {
         HTTP_MONITOR_CAPABILITY,
         WINDOWS_SERVICE_MONITOR_CAPABILITY,
     }:

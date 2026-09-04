@@ -88,6 +88,7 @@ def test_same_client_idempotency_key_returns_same_action(
     second = ExternalActionService(session).propose(client_id, request, "same-key")
 
     assert second.id == first.id
+    assert second.task_id == first.task_id
     assert len(session.exec(select(ToolAction)).all()) == 1
     assert len(session.exec(select(ControlTask)).all()) == 1
 

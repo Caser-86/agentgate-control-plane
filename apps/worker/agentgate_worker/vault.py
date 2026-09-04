@@ -33,7 +33,7 @@ class DPAPIProtector:
 
     def unprotect(self, value: bytes) -> bytes:
         try:
-            import win32crypt  # type: ignore[import-untyped]
+            import win32crypt
         except ImportError as error:
             raise RuntimeError("Windows DPAPI support is unavailable") from error
         return _normalize_dpapi_result(

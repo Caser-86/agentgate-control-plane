@@ -37,3 +37,4 @@ class ActionStatusResponse(BaseModel):
     task_id: UUID | None
     approval_expires_at: datetime | None
     created_at: datetime
+    result: object | None = None

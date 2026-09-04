@@ -9,10 +9,12 @@ from sqlmodel import Session
 from app.auth.models import Operator
 from app.config import Settings, get_settings
 from app.control.enums import SideEffectCertainty, TaskKind
-from app.control.repositories import append_outbox_event, enqueue_task
+from app.control.repositories import append_outbox_event, enqueue_task, enqueue_task_with_status
+from app.files.models import ManagedWorkspace
 from app.models import ActionStatus, ToolAction
 from app.repositories import ActionRepository, AuditRepository, RunRepository
 from app.services.audit import AuditService
+from app.services.file_actions import SUPPORTED_FILE_ACTIONS
 
 
 class ApprovalError(RuntimeError):
@@ -83,6 +85,11 @@ class ApprovalService:
         action = self.action_repository.get(action_id)
         if action is None:
             raise ApprovalNotFoundError("tool action was not found")
+        if action.run_id is None and action.tool_name in SUPPORTED_FILE_ACTIONS:
+            return self._decide_file_action(action, decision, actor, note)
+        run_id = action.run_id
+        if run_id is None:
+            raise ApprovalConflictError("动作缺少关联运行")
         target = (
             ActionStatus.APPROVED
             if decision is ApprovalDecision.APPROVED
@@ -96,7 +103,7 @@ class ApprovalService:
         if action is None:
             raise ApprovalNotFoundError("tool action was not found after decision")
         self.audit.append(
-            action.run_id,
+            run_id,
             f"approval.{decision.value}",
             actor,
             {
@@ -115,7 +122,7 @@ class ApprovalService:
             action.executed_at = datetime.now(UTC)
             self.session.add(action)
             self.audit.append(
-                action.run_id,
+                run_id,
                 "tool.denied",
                 actor,
                 {"reason": action.reason},
@@ -123,7 +130,7 @@ class ApprovalService:
                 commit=False,
             )
 
-        run = self.run_repository.get(action.run_id)
+        run = self.run_repository.get(run_id)
         if run is None:
             raise ApprovalNotFoundError("agent run was not found")
         if decision is ApprovalDecision.DENIED:
@@ -137,26 +144,26 @@ class ApprovalService:
                 }
             )
             self.run_repository.save_checkpoint(
-                action.run_id, messages, run.step_count, commit=False
+                run_id, messages, run.step_count, commit=False
             )
             self._emit(
-                action.run_id,
+                run_id,
                 "action.updated",
                 {"action_id": str(action.id), "status": action.status.value},
             )
         else:
             self._emit(
-                action.run_id,
+                run_id,
                 "action.updated",
                 {"action_id": str(action.id), "status": action.status.value},
             )
         task = enqueue_task(
             self.session,
             kind=TaskKind.AGENT_RUN,
-            payload={"run_id": str(action.run_id)},
-            idempotency_key=f"agent-run-resume:{action.run_id}:action:{action.id}",
+            payload={"run_id": str(run_id)},
+            idempotency_key=f"agent-run-resume:{run_id}:action:{action.id}",
             capability=CONTROL_RUN_CAPABILITY,
-            run_id=action.run_id,
+            run_id=run_id,
             side_effect_certainty=(
                 SideEffectCertainty.POSSIBLE
                 if decision is ApprovalDecision.APPROVED
@@ -164,10 +171,118 @@ class ApprovalService:
             ),
         )
         self._emit(
-            action.run_id,
+            run_id,
             "task.queued",
             {"task_id": str(task.id), "action_id": str(action.id), "kind": task.kind.value},
         )
+        self.session.commit()
+        self.session.refresh(action)
+        return action
+
+    def _decide_file_action(
+        self,
+        action: ToolAction,
+        decision: ApprovalDecision,
+        actor: str,
+        note: str | None,
+    ) -> ToolAction:
+        try:
+            arguments = json.loads(action.arguments_json)
+            workspace_id = UUID(str(arguments["workspace_id"]))
+            workspace_version = arguments["workspace_version"]
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+            raise ApprovalConflictError("文件动作参数已损坏") from error
+        if not isinstance(arguments, dict) or not isinstance(workspace_version, int):
+            raise ApprovalConflictError("文件动作参数已损坏")
+
+        workspace = self.session.get(ManagedWorkspace, workspace_id)
+        if workspace is None:
+            raise ApprovalNotFoundError("工作区不存在")
+        if (
+            decision is ApprovalDecision.APPROVED
+            and workspace.version != workspace_version
+        ):
+            raise ApprovalConflictError("工作区版本已变化，审批未执行")
+        if decision is ApprovalDecision.APPROVED and action.approval_expires_at is not None:
+            expiry = action.approval_expires_at
+            if expiry.tzinfo is None:
+                expiry = expiry.replace(tzinfo=UTC)
+            if expiry <= datetime.now(UTC):
+                self.action_repository.transition(
+                    action.id,
+                    {ActionStatus.PENDING_APPROVAL},
+                    ActionStatus.EXPIRED,
+                    commit=False,
+                )
+                action = self.action_repository.get(action.id) or action
+                action.executed_at = datetime.now(UTC)
+                self.session.add(action)
+                self.session.commit()
+                raise ApprovalConflictError("审批已过期，文件未执行")
+
+        target = (
+            ActionStatus.APPROVED
+            if decision is ApprovalDecision.APPROVED
+            else ActionStatus.DENIED
+        )
+        if not self.action_repository.transition(
+            action.id, {ActionStatus.PENDING_APPROVAL}, target, commit=False
+        ):
+            raise ApprovalConflictError("文件动作已经被处理")
+        action = self.action_repository.get(action.id) or action
+        self.audit.append(
+            None,
+            f"file.action.{decision.value}",
+            actor,
+            {
+                "note": note,
+                "action_id": str(action.id),
+                "workspace_id": str(workspace.id),
+                "arguments_sha256": hashlib.sha256(action.arguments_json.encode()).hexdigest(),
+            },
+            action.id,
+            resource_type="tool_action",
+            resource_id=action.id,
+            commit=False,
+        )
+        if decision is ApprovalDecision.DENIED:
+            action.result_json = json.dumps(
+                {"status": "denied", "reason": "人工拒绝，文件未执行任何变化"},
+                ensure_ascii=False,
+            )
+            action.executed_at = datetime.now(UTC)
+            self.session.add(action)
+            self.session.commit()
+            self.session.refresh(action)
+            return action
+
+        task_payload = {
+            **arguments,
+            "action_id": str(action.id),
+            "arguments_digest": action.arguments_digest or "",
+            "policy_version": action.policy_version or "file-policy.v1",
+        }
+        task, created = enqueue_task_with_status(
+            self.session,
+            kind=TaskKind.CONTROL,
+            payload=task_payload,
+            idempotency_key=f"file-action:{action.id}",
+            capability=action.tool_name,
+            proposer_client_id=action.proposer_client_id,
+            side_effect_certainty=(
+                SideEffectCertainty.READ_ONLY
+                if action.tool_name == "file.inspect.v1"
+                else SideEffectCertainty.POSSIBLE
+            ),
+        )
+        if created:
+            append_outbox_event(
+                self.session,
+                event_type="task.queued",
+                resource_type="control_task",
+                resource_id=task.id,
+                payload={"task_id": str(task.id), "action_id": str(action.id)},
+            )
         self.session.commit()
         self.session.refresh(action)
         return action

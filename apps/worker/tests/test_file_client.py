@@ -252,3 +252,34 @@ def test_file_restore_result_moves_entry_back_without_overwrite(
         "size_bytes": 10,
     }
     assert (root / "report.txt").read_bytes() == b"restore-me"
+
+
+def test_client_recovers_file_result_without_dropping_side_effect_fields(tmp_path: Path) -> None:
+    journal = WorkerJournal(tmp_path / "journal.db")
+    journal.record_started("file-task-1", "c" * 64, datetime.now(UTC) + timedelta(seconds=30))
+    journal.record_result(
+        "file-task-1",
+        {
+            "status": "succeeded",
+            "result_kind": "file_quarantine",
+            "side_effect": "quarantined",
+            "content_sha256": "a" * 64,
+            "size_bytes": 12,
+            "quarantine_entry_id": str(uuid4()),
+            "quarantine_relative_path": "entries/demo/file.txt",
+        },
+    )
+    transport = ContextTransport()
+    client = WorkerClient(
+        base_url="http://localhost:8000",
+        vault=InMemoryVault(),
+        journal=journal,
+        transport=transport,
+        worker_name="local-worker",
+        worker_version="0.1.0",
+        capabilities={"file.quarantine.v1"},
+    )
+    client.vault.save(WorkerCredentials("worker-1", "worker-token", "1.0"))
+
+    assert client.recover_pending_reports() == 1
+    assert transport.requests[-1][2]["result"]["side_effect"] == "quarantined"

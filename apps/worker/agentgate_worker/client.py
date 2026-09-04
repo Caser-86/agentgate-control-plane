@@ -549,11 +549,16 @@ class WorkerClient:
     def recover_pending_reports(self) -> int:
         recovered = 0
         for task_id, request_digest, result in self.journal.pending_reports():
-            safe_result = (
-                sanitize_monitor_result(result)
-                if result.get("status") in {"healthy", "failed", "unknown"}
-                else sanitize_self_check_result(result)
-            )
+            if result.get("result_kind") in {
+                "file_metadata",
+                "file_quarantine",
+                "file_restore",
+            }:
+                safe_result = sanitize_file_result(result)
+            elif result.get("status") in {"healthy", "failed", "unknown"}:
+                safe_result = sanitize_monitor_result(result)
+            else:
+                safe_result = sanitize_self_check_result(result)
             self._request(
                 "POST",
                 f"/api/v1/worker/tasks/{task_id}/report",

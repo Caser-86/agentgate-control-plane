@@ -420,7 +420,7 @@ Expected: the script creates a dedicated temp NTFS workspace, verifies protected
 - Produces `get_action_for_client(action_id: UUID, client_id: UUID) -> ActionStatusResponse` with no absolute paths and bounded result size.
 - Produces `reconcile_file_action(action_id: UUID) -> ReconciliationResult` for restart/lease recovery.
 
-- [ ] **Step 1: Write lifecycle and failure-injection tests**
+- [x] **Step 1: Write lifecycle and failure-injection tests**
 
 ```python
 def test_approval_creates_one_task_and_worker_success_is_terminal(action_client, worker_client):
@@ -447,21 +447,21 @@ def test_restore_conflict_is_visible_and_does_not_overwrite(action_client, real_
     assert response["status"] == "conflict"
 ```
 
-- [ ] **Step 2: Run lifecycle tests before implementation**
+- [x] **Step 2: Run lifecycle tests before implementation**
 
 Run: `Set-Location apps/api; .\.venv\Scripts\python.exe -m pytest tests/test_file_action_lifecycle.py tests/test_file_action_recovery.py tests/test_file_action_e2e.py -q`
 
 Expected: failures for approval-to-task wiring, terminal file result projection, reconciliation and restore conflict mapping.
 
-- [ ] **Step 3: Implement approval and optimistic status transitions**
+- [x] **Step 3: Implement approval and optimistic status transitions**
 
 Allow approval only for `pending_approval` actions whose expiry is in the future and whose workspace version still matches. Insert exactly one task under the existing idempotency key and transition to `queued`; stale approval returns `action_version_conflict`. Denial transitions to terminal `denied` without a task. A Worker result must be accepted only for the leased task/action pair, and side-effect certainty must be stored separately from the user-facing status.
 
-- [ ] **Step 4: Implement recovery and bounded result projection**
+- [x] **Step 4: Implement recovery and bounded result projection**
 
 On API or Worker restart, use the existing lease and journal state: `before_move` is safe to retry once; `after_move_before_report` is reconciled from source/destination hashes and becomes succeeded or manual review; uncertain mismatches become `manual_review_required` and stop retries. Status endpoints expose action ID, action version, status, policy decision, Chinese reason, timestamps, approval expiry, relative target, result summary, and audit cursor; they never expose root paths, file content or raw Worker exceptions. Map all failure codes to stable Chinese messages.
 
-- [ ] **Step 5: Run API integration and existing regression suite, then commit**
+- [x] **Step 5: Run API integration and existing regression suite, then commit**
 
 Run: `Set-Location apps/api; .\.venv\Scripts\python.exe -m pytest tests/test_file_action_lifecycle.py tests/test_file_action_recovery.py tests/test_file_action_e2e.py tests/test_control_queue.py tests/test_control_worker.py tests/test_approvals.py tests/test_audit.py -q`
 

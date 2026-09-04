@@ -7,12 +7,12 @@ from uuid import UUID, uuid4
 
 from sqlmodel import Session, select
 
-from app.control.enums import SideEffectCertainty, TaskKind
+from app.control.enums import SideEffectCertainty, TaskKind, TaskStatus
 from app.control.models import ControlTask
 from app.control.repositories import append_outbox_event, enqueue_task_with_status
 from app.files.models import ManagedWorkspace, QuarantineEntry
 from app.files.security import InvalidRelativePath, normalize_relative_path, protected_match
-from app.models import ActionStatus, PolicyDecision, RiskLevel, ToolAction
+from app.models import ActionStatus, PolicyDecision, RiskLevel, ToolAction, utc_now
 from app.repositories import ActionRepository, AuditRepository
 from app.schemas_actions import ActionStatusResponse, ExternalActionRequest
 from app.services.audit import AuditService
@@ -35,6 +35,14 @@ class PolicyEvaluation:
     code: str
     reason: str
     requires_approval: bool
+
+
+@dataclass(frozen=True)
+class ReconciliationResult:
+    action_id: UUID
+    decision: str
+    status: str
+    reason: str
 
 
 class ExternalActionError(ValueError):
@@ -149,6 +157,7 @@ class ExternalActionService:
 
     def _response(self, action: ToolAction, task_id: UUID | None = None) -> ActionStatusResponse:
         arguments = json.loads(action.arguments_json)
+        result = json.loads(action.result_json) if action.result_json else None
         return ActionStatusResponse(
             id=action.id,
             action=action.tool_name,
@@ -170,6 +179,7 @@ class ExternalActionService:
             task_id=task_id,
             approval_expires_at=action.approval_expires_at,
             created_at=action.created_at,
+            result=result if isinstance(result, dict) else None,
         )
 
     def propose(
@@ -194,7 +204,14 @@ class ExternalActionService:
                 raise ExternalActionError(
                     "idempotency_key_reused", "幂等键已用于不同动作，原动作未改变", 409
                 )
-            return self._response(existing)
+            existing_task = self.session.exec(
+                select(ControlTask).where(
+                    cast(Any, ControlTask.proposer_client_id) == client_id,
+                    cast(Any, ControlTask.idempotency_key)
+                    == f"file-action:{existing.id}",
+                )
+            ).first()
+            return self._response(existing, existing_task.id if existing_task else None)
 
         workspace = self.session.get(ManagedWorkspace, request.workspace_id)
         if workspace is None:
@@ -234,7 +251,12 @@ class ExternalActionService:
 
         task_id: UUID | None = None
         if evaluation.decision == "allow_auto":
-            task_payload = {**arguments, "action_id": str(action.id)}
+            task_payload = {
+                **arguments,
+                "action_id": str(action.id),
+                "arguments_digest": action.arguments_digest or "",
+                "policy_version": action.policy_version or POLICY_VERSION,
+            }
             task, _ = enqueue_task_with_status(
                 self.session,
                 kind=TaskKind.CONTROL,
@@ -300,3 +322,71 @@ class ExternalActionService:
             )
         ).first()
         return self._response(action, task.id if task is not None else None)
+
+
+def reconcile_file_action(session: Session, action_id: UUID) -> ReconciliationResult:
+    action = session.get(ToolAction, action_id)
+    if action is None or action.tool_name not in SUPPORTED_FILE_ACTIONS:
+        raise ExternalActionError("not_found", "动作不存在", 404)
+    if action.status in {
+        ActionStatus.DENIED,
+        ActionStatus.EXPIRED,
+        ActionStatus.SUCCEEDED,
+        ActionStatus.FAILED,
+    }:
+        return ReconciliationResult(
+            action.id, "complete", action.status.value, "动作已经是终态"
+        )
+
+    candidates = session.exec(
+        select(ControlTask).where(ControlTask.capability == action.tool_name)
+    ).all()
+    task = next(
+        (
+            candidate
+            for candidate in candidates
+            if candidate.payload.get("action_id") == str(action.id)
+        ),
+        None,
+    )
+    if task is not None and task.status == TaskStatus.QUEUED:
+        return ReconciliationResult(action.id, "retry_safe", action.status.value, "任务尚未开始")
+    if task is not None and task.status in {TaskStatus.LEASED, TaskStatus.RUNNING}:
+        task.status = TaskStatus.MANUAL_REVIEW
+        task.error_class = "file_action_manual_review_required"
+        task.lease_owner_id = None
+        task.lease_expires_at = None
+        task.completed_at = utc_now()
+        action.status = ActionStatus.FAILED
+        action.result_json = json.dumps(
+            {
+                "status": "failed",
+                "error_code": "manual_review_required",
+                "error_message": "文件动作执行状态不确定，已停止自动重试",
+            },
+            ensure_ascii=False,
+        )
+        action.executed_at = task.completed_at
+        session.add_all([task, action])
+        AuditService(AuditRepository(session)).append(
+            None,
+            "file.action.manual_review_required",
+            "system",
+            {"action_id": str(action.id), "task_id": str(task.id)},
+            action.id,
+            resource_type="tool_action",
+            resource_id=action.id,
+            commit=False,
+        )
+        session.commit()
+        return ReconciliationResult(
+            action.id,
+            "manual_review_required",
+            action.status.value,
+            "任务已开始但没有可信的完成回报",
+        )
+    if task is None:
+        raise ExternalActionError("reconciliation_required", "动作缺少任务记录", 409)
+    return ReconciliationResult(
+        action.id, "complete", action.status.value, "任务已进入终态"
+    )
