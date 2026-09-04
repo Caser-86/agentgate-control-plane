@@ -2,21 +2,21 @@
 
 ## 文件动作治理交付验收 — 2026-09-04
 
-- [x] 交付代码提交 `c4cc123`、运行产物忽略规则提交 `2a42959`、本次验收记录提交 `fd2449c` 均已推送到 GitHub `master`；工作树干净。
+- [x] 交付代码提交 `c4cc123`、运行产物忽略规则提交 `2a42959`、功能验收记录提交 `fd2449c`、正式文件治理改造提交 `ac42809` 均已推送到 GitHub `master`；工作树干净。
 - [x] 正式中文文件治理页面已接入真实工作区、策略拒绝、审批、Native Worker 隔离、恢复和审计入口；浏览器 E2E 覆盖文件检查和状态回显，不再向用户展示独立演示页。
 - [x] API 全套测试 `256 passed, 6 skipped`；Worker 全套测试 `57 passed, 2 skipped`；API/Worker Ruff、API mypy、前端 ESLint、TypeScript、生产构建和 Compose 配置检查通过。
 - [x] Windows 文件动作契约通过；真实磁盘 1 分钟稳定性测试 `7/7` 成功、5 分钟稳定性测试 `22/22` 成功，失败数均为 `0`。日志分别为 `data/file-action-soak-20260904-144540.log` 和 `data/file-action-soak-20260904-144651.log`。
 - [x] 修复真实运行中暴露的两个 Windows 问题：Codex AppContainer 工作区的最终句柄边界解析，以及 `MoveFileEx` 标志从 `win32file` 获取；均增加了回归覆盖。
-- [x] 一键演示、Worker 启动、Task Scheduler 契约和完整 `scripts/verify.ps1 -IncludeWindowsFileContract` 均通过；脚本不覆盖 `.env`，不打印令牌，只操作明确的本地演示目录。
-- [ ] 60 分钟文件动作稳定性测试已后台启动，进程 PID `24584`；完成前不宣称通过。标准输出日志为 `data/file-action-soak-60m.stdout.log`，结束后需检查对应 `data/file-action-soak-*.log` 的样本和失败数。
-- [ ] 24 小时 Windows `EventLog` 监控稳定性测试仍在后台运行，日志为 `data/worker-soak-eventlog-24h.log`；此前观测到的最新样本为 `548`，完成前不宣称最终通过。
+- [x] 本地文件治理准备脚本、Worker 启动、Task Scheduler 契约和完整 `scripts/verify.ps1 -IncludeWindowsFileContract` 均通过；脚本不覆盖 `.env`，不打印令牌，只操作明确的本地工作区。
+- [x] 60 分钟文件动作稳定性测试已完成：`107/107` 成功、失败 `0`；日志为 `data/file-action-soak-20260904-150811.log`，标准输出为 `data/file-action-soak-60m.stdout.log`。
+- [ ] 24 小时 Windows `EventLog` 监控稳定性测试已重新启动，进程 PID `3388`；当前独立日志为 `data/worker-soak-eventlog-24h-restarted.log`。此前日志在第 `730` 次采样后没有 `END` 标记，不能计入完成结果。
 
 # 本机服务登记与稳定性测试 — 2026-09-04
 
 - [x] 选择并登记真实 Windows 内置服务 `EventLog`（Windows 事件日志），目标类型为 `windows_service`，周期 10 秒。
 - [x] Native Worker 已完成首轮探测，目标状态为 `healthy`，结果为 `Windows 服务 RUNNING`。
 - [x] 短时稳定性校验通过：1 分钟、12 次采样、0 次失败。
-- [ ] 24 小时稳定性测试已在后台启动；日志为 `data/worker-soak-eventlog-24h.log`，完成前不能宣称最终通过。
+- [ ] 24 小时稳定性测试已重新启动；日志为 `data/worker-soak-eventlog-24h-restarted.log`，完成前不能宣称最终通过。
 
 # 原生 Worker 持续监控与登录自启动 — 2026-09-04
 
