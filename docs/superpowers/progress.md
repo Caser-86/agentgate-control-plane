@@ -2,7 +2,7 @@
 
 ## 文件动作治理交付验收 — 2026-09-04
 
-- [x] 交付已提交并推送到 GitHub `master`；当前 HEAD 为 `2a42959`，工作树干净。
+- [x] 交付代码提交 `c4cc123`、运行产物忽略规则提交 `2a42959`、本次验收记录提交 `fd2449c` 均已推送到 GitHub `master`；工作树干净。
 - [x] 中文安全演示页面已接入真实工作区、策略拒绝、审批、Native Worker 隔离、恢复和审计入口；浏览器 E2E `3 passed`，其中安全演示覆盖四个中文闭环状态。
 - [x] API 全套测试 `256 passed, 6 skipped`；Worker 全套测试 `57 passed, 2 skipped`；API/Worker Ruff、API mypy、前端 ESLint、TypeScript、生产构建和 Compose 配置检查通过。
 - [x] Windows 文件动作契约通过；真实磁盘 1 分钟稳定性测试 `7/7` 成功、5 分钟稳定性测试 `22/22` 成功，失败数均为 `0`。日志分别为 `data/file-action-soak-20260904-144540.log` 和 `data/file-action-soak-20260904-144651.log`。
