@@ -6,11 +6,18 @@ import type {
   AuditFilters,
   CreateMonitorTargetRequest,
   CreateRunRequest,
+  ActionListFilters,
+  ClientTokenCreated,
+  ExternalActionRequest,
+  ExternalActionStatus,
   MonitorEvent,
   MonitorTarget,
+  PlatformHealth,
   PolicyView,
   RunDetail,
   ToolAction,
+  ManagedWorkspace,
+  QuarantineEntry,
 } from "../types";
 import { validateApiBaseUrl } from "./validate-api-base-url";
 
@@ -25,6 +32,16 @@ const API_BASE_URL = resolveApiBaseUrl(
   typeof window === "undefined" ? undefined : window.__AGENTGATE_CONFIG__,
 );
 export const apiBaseUrl = API_BASE_URL;
+
+export function localMonitorEndpoint(baseUrl: string): string {
+  if (!baseUrl.trim()) return "http://127.0.0.1:8000/health";
+  const parsed = new URL(validateApiBaseUrl(baseUrl));
+  parsed.hostname = "127.0.0.1";
+  parsed.pathname = "/health";
+  parsed.search = "";
+  parsed.hash = "";
+  return parsed.toString();
+}
 
 export function eventStreamUrl(runId: string, after: number): string {
   const params = new URLSearchParams({ after: String(Math.max(after, 0)) });
@@ -56,29 +73,54 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!["GET", "HEAD", "OPTIONS"].includes(method) && csrfToken) {
     headers.set("X-CSRF-Token", csrfToken);
   }
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...init,
-    credentials: "include",
-    headers,
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      ...init,
+      credentials: "include",
+      headers,
+    });
+  } catch {
+    throw new ApiError(
+      "service_unavailable",
+      "无法连接本地 API，请确认服务已经启动。",
+      0,
+    );
+  }
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as {
       error?: { code?: string; message?: string };
     } | null;
     const code = response.status === 401
-      ? "authentication_required"
+      ? body?.error?.code ?? "authentication_required"
       : response.status === 422
         ? "validation_error"
-        : body?.error?.code ?? "http_error";
+        : response.status >= 500
+          ? "server_error"
+          : body?.error?.code ?? "http_error";
+    const messages: Record<string, string> = {
+      authentication_required: "需要登录或当前会话已失效。",
+      operator_required: "该请求需要管理员身份。",
+      csrf_validation_failed: "安全校验失败，请刷新页面后重试。",
+      invalid_credentials: "管理员密码不正确，请检查后重试。",
+      invalid_or_expired_bootstrap_token: "引导令牌无效或已过期，请重新获取。",
+      setup_already_completed: "管理员初始化已经完成，请直接登录。",
+      not_found: "请求的资源不存在。",
+      invalid_target: "监控目标配置不合法，请检查地址和参数。",
+      validation_error: "输入参数不正确，请检查后重试。",
+      server_error: "本地服务处理失败，请稍后重试。",
+      http_error: "请求失败，请稍后重试。",
+    };
     if (response.status === 401 && typeof window !== "undefined") {
       window.dispatchEvent(new Event("agentgate:session-expired"));
     }
     throw new ApiError(
       code,
-      "Request failed",
+      messages[code] ?? body?.error?.message ?? "请求失败，请稍后重试。",
       response.status,
     );
   }
+  if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
 }
 
@@ -87,6 +129,14 @@ function queryString(filters: AuditFilters): string {
   for (const [key, value] of Object.entries(filters)) {
     if (value) params.set(key, value);
   }
+  const query = params.toString();
+  return query ? `?${query}` : "";
+}
+
+function actionQueryString(filters: ActionListFilters): string {
+  const params = new URLSearchParams();
+  if (filters.status) params.set("status", filters.status);
+  if (filters.risk_level) params.set("risk_level", filters.risk_level);
   const query = params.toString();
   return query ? `?${query}` : "";
 }
@@ -143,6 +193,46 @@ export const api = {
   getMeta(): Promise<ApiMeta> {
     return request<ApiMeta>("/api/meta");
   },
+  listActions(filters: ActionListFilters = {}): Promise<ToolAction[]> {
+    return request<ToolAction[]>(`/api/actions${actionQueryString(filters)}`);
+  },
+  getAction(id: string): Promise<ToolAction> {
+    return request<ToolAction>(`/api/actions/${encodeURIComponent(id)}`);
+  },
+  listApprovals(): Promise<ToolAction[]> {
+    return request<ToolAction[]>("/api/approvals");
+  },
+  createClientToken(input: { name: string; scopes: string[]; expires_in_seconds?: number }): Promise<ClientTokenCreated> {
+    return request<ClientTokenCreated>("/api/auth/tokens", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+  revokeClientToken(id: string): Promise<void> {
+    return request<void>(`/api/auth/tokens/${encodeURIComponent(id)}`, { method: "DELETE" });
+  },
+  submitExternalAction(
+    token: string,
+    input: ExternalActionRequest,
+    idempotencyKey: string,
+  ): Promise<ExternalActionStatus> {
+    return request<ExternalActionStatus>("/api/v1/actions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Idempotency-Key": idempotencyKey,
+      },
+      body: JSON.stringify(input),
+    });
+  },
+  getExternalActionStatus(token: string, id: string): Promise<ExternalActionStatus> {
+    return request<ExternalActionStatus>(`/api/v1/actions/${encodeURIComponent(id)}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+  },
+  getPlatformHealth(): Promise<PlatformHealth> {
+    return request<PlatformHealth>("/api/platform/health");
+  },
   listMonitorTargets(): Promise<MonitorTarget[]> {
     return request<MonitorTarget[]>("/api/monitor/targets");
   },
@@ -157,5 +247,24 @@ export const api = {
   },
   listMonitorEvents(): Promise<MonitorEvent[]> {
     return request<MonitorEvent[]>("/api/monitor/events");
+  },
+  listWorkspaces(): Promise<ManagedWorkspace[]> {
+    return request<ManagedWorkspace[]>("/api/v1/workspaces");
+  },
+  createWorkspace(input: { name: string; root_path: string; protected_patterns?: string[] }): Promise<ManagedWorkspace> {
+    return request<ManagedWorkspace>("/api/v1/workspaces", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+  updateWorkspace(id: string, input: { name?: string; root_path?: string; protected_patterns?: string[]; enabled?: boolean }): Promise<ManagedWorkspace> {
+    return request<ManagedWorkspace>(`/api/v1/workspaces/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    });
+  },
+  listQuarantineEntries(id: string, status?: string): Promise<{ items: QuarantineEntry[] }> {
+    const query = status ? `?status=${encodeURIComponent(status)}` : "";
+    return request<{ items: QuarantineEntry[] }>(`/api/v1/workspaces/${encodeURIComponent(id)}/quarantine${query}`);
   },
 };

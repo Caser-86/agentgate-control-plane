@@ -38,6 +38,9 @@ const toolLabels: Record<string, string> = {
   search_logs: "查询服务日志",
   restart_service: "重启服务",
   rotate_api_key: "轮换 API 密钥",
+  "file.inspect.v1": "检查文件",
+  "file.quarantine.v1": "隔离文件",
+  "file.restore.v1": "恢复文件",
 };
 
 const toolDescriptions: Record<string, string> = {
@@ -45,6 +48,9 @@ const toolDescriptions: Record<string, string> = {
   search_logs: "查询服务日志，不会改变运行中的资源。",
   restart_service: "重启服务，会改变运行中的资源状态。",
   rotate_api_key: "轮换 API 密钥，会立即影响凭据。",
+  "file.inspect.v1": "只读取文件元数据和 SHA-256 摘要，不读取文件内容。",
+  "file.quarantine.v1": "获批后把普通文件移动到隔离区，不覆盖同名目标。",
+  "file.restore.v1": "获批后把已隔离文件恢复到原相对路径，目标冲突时停止。",
 };
 
 const eventLabels: Record<string, string> = {
@@ -67,6 +73,12 @@ const eventLabels: Record<string, string> = {
   "monitor.probe.recorded": "监控探测已记录",
   "monitor.event.opened": "监控故障已打开",
   "monitor.event.closed": "监控故障已恢复",
+  "file.action.pending_approval": "文件动作等待审批",
+  "file.action.denied": "文件动作已拒绝",
+  "file.action.queued": "文件动作已排队",
+  "file.action.updated": "文件动作状态更新",
+  "file.action.completed": "文件动作已完成",
+  "file.action.manual_review_required": "文件动作需要人工复核",
 };
 
 const actorLabels: Record<string, string> = {
@@ -75,6 +87,7 @@ const actorLabels: Record<string, string> = {
   policy: "策略引擎",
   tool: "工具执行器",
   system: "系统",
+  monitoring: "监控服务",
 };
 
 const reasonLabels: Record<string, string> = {
@@ -114,7 +127,16 @@ export function eventLabel(value: string): string {
 }
 
 export function actorLabel(value: string): string {
+  if (value === "operator:00000000-0000-0000-0000-000000000001") return "本地操作员";
+  if (value.startsWith("operator:")) return "管理员";
+  if (value.startsWith("client:")) return "外部 Agent";
+  if (value.startsWith("control-worker:")) return "控制 Worker";
+  if (value.startsWith("worker:")) return "原生 Worker";
   return actorLabels[value] ?? value;
+}
+
+export function actionLabel(value: string): string {
+  return toolLabel(value);
 }
 
 export function reasonLabel(value: string): string {

@@ -3,7 +3,12 @@ param(
     [string]$ApiUrl = "",
     [int]$ApiPort = 0,
     [string]$StateDir = ".agentgate-worker",
-    [string]$EnrollmentToken = ""
+    [string]$EnrollmentToken = "",
+    [switch]$Continuous,
+    [ValidateRange(0.1, 60.0)]
+    [double]$PollSeconds = 1.0,
+    [ValidateRange(1.0, 60.0)]
+    [double]$HeartbeatSeconds = 10.0
 )
 
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
@@ -71,7 +76,27 @@ if (-not $apiUrlSupplied) { $ApiUrl = "http://127.0.0.1:$ApiPort" }
 Push-Location $workerRoot
 $workerExitCode = 0
 try {
-    & $python -m agentgate_worker.main --api-url $ApiUrl --state-dir $StateDir --enrollment-token $EnrollmentToken
+    $workerArgs = @(
+        "-m"
+        "agentgate_worker.main"
+        "--api-url"
+        $ApiUrl
+        "--state-dir"
+        $StateDir
+    )
+    if (-not [string]::IsNullOrWhiteSpace($EnrollmentToken)) {
+        $workerArgs += @("--enrollment-token", $EnrollmentToken)
+    }
+    if ($Continuous) {
+        $workerArgs += @(
+            "--loop"
+            "--poll-seconds"
+            $PollSeconds
+            "--heartbeat-seconds"
+            $HeartbeatSeconds
+        )
+    }
+    & $python @workerArgs
     $workerExitCode = $LASTEXITCODE
 } finally {
     Pop-Location

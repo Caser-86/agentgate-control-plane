@@ -2,6 +2,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import Depends, HTTPException, Request
 from sqlmodel import Session, select
@@ -15,6 +16,7 @@ from app.db import get_session
 from app.models import utc_now
 
 SESSION_COOKIE = "agentgate_session"
+LOCAL_OPERATOR_ID = UUID("00000000-0000-0000-0000-000000000001")
 
 SessionDep = Annotated[Session, Depends(get_session)]
 
@@ -41,10 +43,20 @@ class WorkerIdentity:
 
 
 def _auth_error(status_code: int, code: str) -> HTTPException:
-    return HTTPException(status_code=status_code, detail={"code": code, "message": "Access denied"})
+    return HTTPException(status_code=status_code, detail={"code": code, "message": "访问被拒绝"})
+
+
+def _local_operator() -> Operator:
+    return Operator(
+        id=LOCAL_OPERATOR_ID,
+        password_hash="local-auth-disabled",
+        installation_key="local-auth-disabled",
+    )
 
 
 def require_operator(request: Request, session: SessionDep) -> Operator:
+    if not get_settings().auth_enabled:
+        return _local_operator()
     raw_token = request.cookies.get(SESSION_COOKIE)
     if not raw_token:
         if request.headers.get("Authorization"):
@@ -62,6 +74,8 @@ def require_operator(request: Request, session: SessionDep) -> Operator:
 
 
 def require_csrf(request: Request, session: SessionDep) -> Operator:
+    if not get_settings().auth_enabled:
+        return _local_operator()
     operator = require_operator(request, session)
     raw_session_token = request.cookies.get(SESSION_COOKIE)
     csrf_token = request.headers.get("X-CSRF-Token")

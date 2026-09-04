@@ -18,6 +18,8 @@ describe("zh-CN interface vocabulary", () => {
   expect(eventLabel("approval.approved")).toBe("审批已通过");
   expect(eventLabel("run.waiting_approval")).toBe("运行等待审批");
     expect(actorLabel("policy")).toBe("策略引擎");
+    expect(actorLabel("operator:00000000-0000-0000-0000-000000000001")).toBe("本地操作员");
+    expect(actorLabel("monitoring")).toBe("监控服务");
     expect(modeLabel(false)).toBe("会改变状态");
     expect(toolLabel("vendor_specific_tool")).toBe("vendor_specific_tool");
   });

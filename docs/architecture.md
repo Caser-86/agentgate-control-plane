@@ -30,6 +30,9 @@ flowchart LR
     Executor --> DB
     Scheduler --> DB
     ControlWorker --> DB
+    NativeWorker[Windows Native Worker] -->|heartbeat / claim / report| API
+    TaskScheduler[Windows Task Scheduler] -->|AtLogOn starts| NativeWorker
+    NativeWorker -->|受控 inspect/quarantine/restore| FileSystem[Windows 受管工作区]
 ```
 
 API 负责创建运行、读取详情、处理审批、查询审计记录和提供 SSE 流。`AgentRunner` 是唯一的有状态编排边界：它加载检查点、调用与提供方无关的 LLM 接口、校验工具参数、将动作送入策略判断，并在审批决定后恢复运行。
@@ -116,6 +119,8 @@ sequenceDiagram
 
 ## 本地演示限制与生产演进路径
 
-当前版本仍刻意限制为本地运行：Compose 将 Web/API 绑定到回环地址，PostgreSQL 不发布宿主机端口。scheduler 负责恢复持久化租约并为到期监控目标排队，control-worker 处理持久化控制任务；原生 Windows Worker 处理 `platform.self_check`、本机 HTTP 和 Windows 服务只读探针。监控只允许回环 HTTP 地址和安全格式的服务名，不保存响应正文，也不执行任意 Shell/PowerShell。真实服务重启、文件写入和密钥操作仍未实现。
+当前版本仍刻意限制为本地运行：Compose 将 Web/API 绑定到回环地址，PostgreSQL 不发布宿主机端口。scheduler 负责恢复持久化租约并为到期监控目标排队，control-worker 处理持久化控制任务；原生 Windows Worker 处理 `platform.self_check`、本机 HTTP、Windows 服务只读探针，以及受管工作区内的文件检查、隔离和恢复。监控只允许回环 HTTP 地址和安全格式的服务名，不保存响应正文，也不执行任意 Shell/PowerShell。文件动作只接受相对路径，保护规则直接拒绝，恢复不覆盖目标冲突；真实 Windows 服务重启和密钥操作仍未实现。
+
+原生 Worker 默认执行一轮后退出；使用 `--loop` 后会立即发送心跳，恢复 journal 中的待报告结果，逐个领取监控任务并上报结构化结果，空队列按轮询间隔等待。协议错误不会执行任务，而是使用 1、2、4、8、16、30 秒的有界退避重试。SIGINT/SIGTERM 只设置停止事件，Worker 在当前等待点退出。Windows 自启动脚本通过当前用户的 `AtLogOn` 计划任务启动持续模式，任务参数只包含回环 API 地址和状态目录，安装前必须已有 DPAPI 加密凭据，卸载只注销计划任务并保留状态目录。
 
 本地端口约定：`AGENTGATE_API_PORT` 默认是 `8000`，`AGENTGATE_WEB_PORT` 默认是 `5173`。Compose 只发布 `127.0.0.1:<port>`；API 根据 Web 端口生成 CORS 来源，Vite 根据 API 端口生成开发代理和 API 基地址，构建后的 Web 容器也使用同一份 Compose 解析出的运行时 API 地址。只支持 `localhost`/`127.0.0.1` 目标。

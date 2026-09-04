@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { api, eventStreamUrl, resolveApiBaseUrl } from "./client";
+import { api, eventStreamUrl, localMonitorEndpoint, resolveApiBaseUrl } from "./client";
 
 describe("api client", () => {
   afterEach(() => vi.restoreAllMocks());
@@ -16,7 +16,7 @@ describe("api client", () => {
     );
 
     await expect(api.getRun("missing")).rejects.toEqual(
-      expect.objectContaining({ code: "not_found", message: "Request failed", status: 404 }),
+      expect.objectContaining({ code: "not_found", message: "请求的资源不存在。", status: 404 }),
     );
     expect(fetch).toHaveBeenCalledWith(
       "http://localhost:8000/api/runs/missing",
@@ -38,6 +38,61 @@ describe("api client", () => {
 
   it("treats whitespace-only runtime API configuration as same-origin", () => {
     expect(resolveApiBaseUrl({ apiBaseUrl: "   \t\n" })).toBe("");
+  });
+
+  it("derives a loopback monitoring endpoint from the configured API port", () => {
+    expect(localMonitorEndpoint("http://localhost:18230")).toBe(
+      "http://127.0.0.1:18230/health",
+    );
+    expect(localMonitorEndpoint("")).toBe("http://127.0.0.1:8000/health");
+  });
+
+  it("reports a local service error when the API cannot be reached", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+
+    await expect(api.getRun("missing")).rejects.toEqual(
+      expect.objectContaining({
+        code: "service_unavailable",
+        message: "无法连接本地 API，请确认服务已经启动。",
+        status: 0,
+      }),
+    );
+  });
+
+  it("accepts empty 204 responses for revoke and logout operations", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn()
+        .mockResolvedValueOnce(new Response(null, { status: 204 }))
+        .mockResolvedValueOnce(new Response(null, { status: 204 })),
+    );
+
+    await expect(api.revokeClientToken("token-1")).resolves.toBeUndefined();
+    await expect(api.logout()).resolves.toBeUndefined();
+  });
+
+  it("reads the secret-free platform health endpoint", async () => {
+    const responseBody = {
+      status: "ok",
+      checks: {
+        worker: {
+          status: "ok",
+          code: "worker_heartbeat_recent",
+          message_zh: "Worker 心跳正常",
+          observed_at: "2026-09-04T00:00:00+00:00",
+          details: {},
+        },
+      },
+    };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(responseBody), { status: 200 }),
+    ));
+
+    await expect(api.getPlatformHealth()).resolves.toEqual(responseBody);
+    expect(fetch).toHaveBeenCalledWith(
+      "http://localhost:8000/api/platform/health",
+      expect.anything(),
+    );
   });
 
   it("calls the Chinese monitoring API endpoints", async () => {

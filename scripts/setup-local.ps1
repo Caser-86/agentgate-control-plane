@@ -1,3 +1,8 @@
+param(
+    [ValidateSet("mock", "openai_compatible")]
+    [string]$Provider
+)
+
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $repoRoot
@@ -24,7 +29,11 @@ Push-Location $webRoot
 npm.cmd ci
 if ($LASTEXITCODE -ne 0) { Pop-Location; throw "npm.cmd ci failed." }
 Pop-Location
-& (Join-Path $PSScriptRoot "start-local.ps1") -Provider "mock"
+if ($PSBoundParameters.ContainsKey("Provider")) {
+    & (Join-Path $PSScriptRoot "start-local.ps1") -Provider $Provider
+} else {
+    & (Join-Path $PSScriptRoot "start-local.ps1")
+}
 $tokenPath = Join-Path $repoRoot "data\bootstrap-token"
 $configJson = docker compose config --format json
 # Compose resolves AGENTGATE_API_PORT and AGENTGATE_WEB_PORT from the environment.
@@ -33,6 +42,11 @@ $config = $configJson | ConvertFrom-Json
 $webMatches = @($config.services.web.ports | Where-Object { [int]$_.target -eq 80 -and $_.host_ip -eq "127.0.0.1" })
 if ($webMatches.Count -ne 1) { throw "Web service must have exactly one loopback port binding." }
 $webPort = [int]$webMatches[0].published
-Write-Host "首次运行 bootstrap-token 文件路径：$tokenPath"
-Write-Host "请在本机受信任的终端中读取该文件并完成 /api/auth/setup；脚本不会打印 token 内容。"
+$authEnabled = [string]$config.services.api.environment.AGENTGATE_AUTH_ENABLED
+if ($authEnabled -eq "true") {
+    Write-Host "首次运行 bootstrap-token 文件路径：$tokenPath"
+    Write-Host "请在本机受信任的终端中读取该文件并完成 /api/auth/setup；脚本不会打印 token 内容。"
+} else {
+    Write-Host "当前为本机免密模式，无需 bootstrap-token。"
+}
 Start-Process "http://127.0.0.1:$webPort"

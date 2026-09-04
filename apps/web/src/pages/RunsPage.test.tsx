@@ -41,4 +41,16 @@ describe("RunsPage", () => {
     await waitFor(() => expect(api.createRun).toHaveBeenCalledWith({ user_request: "检查 payments-api" }));
     expect(await screen.findByRole("link", { name: /run-new/ })).toBeInTheDocument();
   });
+
+  it("shows the control flow as a signal track", async () => {
+    render(
+      <MemoryRouter>
+        <RunsPage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByRole("list", { name: "控制流程" })).toBeInTheDocument();
+    expect(screen.getByText("策略判断")).toBeInTheDocument();
+    expect(screen.getByText("留下证据")).toBeInTheDocument();
+  });
 });

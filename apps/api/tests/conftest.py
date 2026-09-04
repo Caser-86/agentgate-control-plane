@@ -19,6 +19,12 @@ from app.main import app
 from tests.test_migrations import safe_test_database_url
 
 
+@pytest.fixture(autouse=True)
+def auth_enabled_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep security regression tests independent from a developer's local .env."""
+    monkeypatch.setattr(get_settings(), "auth_enabled", True)
+
+
 @pytest.fixture
 def auth_client(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -28,6 +34,7 @@ def auth_client(
     create_db_and_tables(engine)
     token_file = tmp_path / "bootstrap-token"
     settings = get_settings()
+    monkeypatch.setattr(settings, "auth_enabled", True)
     monkeypatch.setattr(settings, "auth_bootstrap_token_file", str(token_file))
     monkeypatch.setattr(settings, "auth_cookie_secure", False)
     with Session(engine) as session:

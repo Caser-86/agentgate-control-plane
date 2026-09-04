@@ -1,5 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
+import httpx
 import pytest
 
 from agentgate_worker.client import HttpTransport, WorkerClient
@@ -83,6 +84,26 @@ def test_client_complete_sends_only_self_check_fields(tmp_path: object) -> None:
 
     sent = transport.requests[-1][2]["result"]
     assert sent == {"status": "succeeded", "detail": "read-only"}
+
+
+def test_client_treats_empty_claim_response_as_no_task(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: object
+) -> None:
+    """The API uses JSON null to signal that the queue is currently empty."""
+    monkeypatch.setattr(
+        "httpx.request", lambda *args, **kwargs: httpx.Response(200, content=b"null")
+    )
+    client = WorkerClient(
+        base_url="http://localhost:8000",
+        vault=InMemoryVault(),
+        journal=WorkerJournal(tmp_path / "journal.db"),  # type: ignore[operator]
+        worker_name="local-worker",
+        worker_version="0.1.0",
+        capabilities={"platform.self_check"},
+    )
+    client.vault.save(WorkerCredentials("worker-1", "worker-token", "1.0"))
+
+    assert client.claim() is None
 
 
 @pytest.mark.parametrize(

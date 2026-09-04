@@ -1,11 +1,44 @@
 # 最终集成修复进度
 
+## 文件动作治理交付验收 — 2026-09-04
+
+- [x] 中文安全演示页面已接入真实工作区、策略拒绝、审批、Native Worker 隔离、恢复和审计入口；浏览器 E2E `3 passed`，其中安全演示覆盖四个中文闭环状态。
+- [x] API 全套测试 `256 passed, 6 skipped`；Worker 全套测试 `57 passed, 2 skipped`；API/Worker Ruff、API mypy、前端 ESLint、TypeScript、生产构建和 Compose 配置检查通过。
+- [x] Windows 文件动作契约通过；真实磁盘 1 分钟稳定性测试 `7/7` 成功、5 分钟稳定性测试 `22/22` 成功，失败数均为 `0`。日志分别为 `data/file-action-soak-20260904-144540.log` 和 `data/file-action-soak-20260904-144651.log`。
+- [x] 修复真实运行中暴露的两个 Windows 问题：Codex AppContainer 工作区的最终句柄边界解析，以及 `MoveFileEx` 标志从 `win32file` 获取；均增加了回归覆盖。
+- [x] 一键演示、Worker 启动、Task Scheduler 契约和完整 `scripts/verify.ps1 -IncludeWindowsFileContract` 均通过；脚本不覆盖 `.env`，不打印令牌，只操作明确的本地演示目录。
+- [ ] 60 分钟文件动作稳定性测试已后台启动，进程 PID `24584`；完成前不宣称通过。标准输出日志为 `data/file-action-soak-60m.stdout.log`，结束后需检查对应 `data/file-action-soak-*.log` 的样本和失败数。
+- [ ] 24 小时 Windows `EventLog` 监控稳定性测试仍在后台运行，日志为 `data/worker-soak-eventlog-24h.log`；此前观测到的最新样本为 `548`，完成前不宣称最终通过。
+
+# 本机服务登记与稳定性测试 — 2026-09-04
+
+- [x] 选择并登记真实 Windows 内置服务 `EventLog`（Windows 事件日志），目标类型为 `windows_service`，周期 10 秒。
+- [x] Native Worker 已完成首轮探测，目标状态为 `healthy`，结果为 `Windows 服务 RUNNING`。
+- [x] 短时稳定性校验通过：1 分钟、12 次采样、0 次失败。
+- [ ] 24 小时稳定性测试已在后台启动；日志为 `data/worker-soak-eventlog-24h.log`，完成前不能宣称最终通过。
+
+# 原生 Worker 持续监控与登录自启动 — 2026-09-04
+
+- [x] Worker 增加 `--loop` 持续模式、可配置轮询/心跳间隔、journal 恢复、任务处理、信号停止和有界退避。
+- [x] Windows `start-worker.ps1` 增加 `-Continuous`，并新增当前用户 `AtLogOn` 计划任务安装/卸载脚本；计划任务不保存令牌，卸载不删除 Worker 状态。
+- [x] 中文 Web 侧栏复用 `/api/platform/health`，每 10 秒显示本机 Worker 的在线、需要检查或不可用状态。
+- [x] 已增加 Worker 循环、PowerShell 脚本契约、API 客户端和 AppShell 状态测试。
+- [x] 已使用现有本地 Worker 凭据执行 `install-worker.ps1`，创建并启动当前用户的 `AtLogOn` 计划任务；任务参数未包含令牌，前端显示 Worker 在线。
+
+## 本机免密模式 — 2026-09-03
+
+- [x] 新增 `AGENTGATE_AUTH_ENABLED` 开关；Compose 和当前本机 `.env` 默认关闭 Web 管理员密码。
+- [x] 免密模式下 Web 直接进入控制台，浏览器读取、运行、审批、审计和监控接口均可用；使用固定临时本地操作员身份记录审计，不写入密码。
+- [x] 外部 Agent Bearer token、原生 Worker enrollment token 和 Worker token 仍保留；API/Web 继续只绑定回环地址。
+- [x] 保留密码认证流程；将 `AGENTGATE_AUTH_ENABLED=true` 后重启 `api web` 即可恢复。
+- [x] API `208 passed, 6 skipped`，Web `38 passed`，Ruff/mypy/ESLint/typecheck/build/Compose config 全部通过；正式 Compose 已重建并验证免密模式。
+
 ## 真实运行验收与 Ark 配置 — 2026-09-03
 
 - [x] 在隔离的本机 SQLite 实例中完成 HTTP 监控闭环：原生 Worker 注册、健康观测、服务停止后的 `failed`/`down` 与活动事件、服务恢复后的 `healthy`/事件关闭。
 - [x] 修复带有效期 enrollment token 的 SQLite 时间类型兼容问题；`start-worker.ps1` 现在会正确向上传递 Worker 失败退出码。
 - [x] 当前正式 Compose 已使用 `openai_compatible` 提供方，加载 Ark Base URL 和 `ark-code-latest`；真实请求冒烟返回文本成功。
-- [x] 最新修复已推送到公共仓库 `master`，远端 HEAD 为 `cab61b9`。
+- [x] 此前修复已推送到公共仓库 `master`，当前远端 HEAD 为 `c859429`；本轮配置、文案和错误处理修复尚未提交。
 - [ ] 正式 Postgres 实例尚未添加用户自己的监控目标或 Native Worker 凭据；这一步需要在 Web 中使用已设置的管理员密码创建 Worker enrollment token，不能由脚本读取或绕过。
 
 ## 最终本地端口/Worker 修复轮次 — 2026-09-01
@@ -47,5 +80,5 @@
 - [x] 扩展 Native Worker 显式能力白名单：`monitor.http`、`monitor.windows_service`；Windows 服务仅固定调用 `sc.exe query`，禁止任意 Shell/PowerShell。
 - [x] 增加中文“监控”页面、目标登记、手动探测、周期调度和监控 API。
 - [x] 本轮代码级验证已执行；24 小时稳定性测试仍未执行，不能以短时测试结果替代长期验收。
-- [x] 本机 Compose 运行验证已通过：`0009_monitoring_mvp` 迁移成功，API `http://127.0.0.1:18230/health` 返回 `200`，Web `http://127.0.0.1:15173` 返回 `200`，未登录访问监控 API 正确返回 `401`。
+- [x] 本机 Compose 运行验证已通过：`0009_monitoring_mvp` 迁移成功，API `http://127.0.0.1:18230/health` 返回 `200`，Web `http://127.0.0.1:15173` 返回 `200`；启用认证的回归测试仍验证未登录监控 API 返回 `401`。
 - [ ] 本次运行使用 `mock` 提供方；Ark 真实模型请求不在本轮启动链路中重复调用。监控的 24 小时稳定性、真实 Windows 服务探针和原生 Worker 长时间运行仍待单独验收。

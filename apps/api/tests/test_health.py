@@ -28,6 +28,7 @@ def test_meta_returns_provider_without_secret_material(
     assert response.json() == {
         "provider": get_settings().llm_provider,
         "model": get_settings().llm_model,
+        "api_base_url": get_settings().api_base_url,
         "status": "ok",
     }
     assert "api_key" not in response.text
@@ -66,3 +67,28 @@ def test_production_startup_does_not_seed_demo_service_state(monkeypatch) -> Non
             payments = session.get(ServiceState, "payments-api")
 
     assert payments is None
+
+
+def test_disabled_auth_startup_does_not_issue_a_bootstrap_token(
+    monkeypatch, tmp_path
+) -> None:
+    engine = create_db_engine("sqlite://")
+    create_db_and_tables(engine)
+    bootstrap_file = tmp_path / "bootstrap-token"
+    monkeypatch.setattr(main, "get_engine", lambda: engine)
+    monkeypatch.setattr(
+        main,
+        "settings",
+        Settings.model_construct(
+            environment="development",
+            auth_enabled=False,
+            database_migration_required=False,
+            seed_demo=False,
+            auth_bootstrap_token_file=str(bootstrap_file),
+        ),
+    )
+
+    with TestClient(app):
+        pass
+
+    assert not bootstrap_file.exists()

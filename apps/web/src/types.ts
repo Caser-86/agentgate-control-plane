@@ -35,7 +35,7 @@ export interface AgentRun {
 
 export interface ToolAction {
   id: string;
-  run_id: string;
+  run_id: string | null;
   tool_call_id: string;
   tool_name: string;
   risk_level: RiskLevel;
@@ -100,7 +100,23 @@ export interface AuditFilters {
 export interface ApiMeta {
   provider: string;
   model: string;
+  api_base_url: string;
   status: string;
+}
+
+export type PlatformHealthCheckStatus = "ok" | "degraded" | "error";
+
+export interface PlatformHealthCheck {
+  status: PlatformHealthCheckStatus;
+  code: string;
+  message_zh: string;
+  observed_at: string;
+  details: JsonObject;
+}
+
+export interface PlatformHealth {
+  status: "ok" | "degraded";
+  checks: Record<string, PlatformHealthCheck>;
 }
 
 export type MonitorTargetKind = "http" | "windows_service";
@@ -151,4 +167,66 @@ export interface CreateMonitorTargetRequest {
   timeout_seconds?: number;
   failure_threshold?: number;
   recovery_threshold?: number;
+}
+
+export interface ManagedWorkspace {
+  id: string;
+  name: string;
+  root_path: string;
+  quarantine_root_path: string;
+  protected_patterns: string[];
+  enabled: boolean;
+  version: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface QuarantineEntry {
+  id: string;
+  workspace_id: string;
+  action_id: string;
+  original_relative_path: string;
+  quarantine_relative_path: string;
+  content_sha256: string;
+  size_bytes: number;
+  status: "quarantined" | "restored" | "failed" | string;
+  created_at: string;
+  restored_at: string | null;
+}
+
+export interface ActionListFilters {
+  status?: string;
+  risk_level?: string;
+}
+
+export interface ExternalActionRequest {
+  action: "file.inspect.v1" | "file.quarantine.v1" | "file.restore.v1";
+  workspace_id: string;
+  relative_path?: string;
+  quarantine_entry_id?: string;
+  reason?: string;
+}
+
+export interface ExternalActionStatus {
+  id: string;
+  action: ExternalActionRequest["action"];
+  workspace_id: string;
+  relative_path: string | null;
+  quarantine_entry_id: string | null;
+  decision: string;
+  status: ActionStatus;
+  reason: string;
+  action_version: string;
+  task_id: string | null;
+  approval_expires_at: string | null;
+  created_at: string;
+  result: JsonObject | null;
+}
+
+export interface ClientTokenCreated {
+  id: string;
+  name: string;
+  scopes: string[];
+  expires_at: string | null;
+  token: string;
 }

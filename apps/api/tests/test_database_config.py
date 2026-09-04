@@ -37,3 +37,26 @@ def test_local_ports_drive_api_base_url_and_cors_origin(
         assert settings.web_origin == "http://localhost:15173"
     finally:
         get_settings.cache_clear()
+
+
+def test_disabled_auth_is_rejected_outside_development(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENTGATE_AUTH_ENABLED", "false")
+    monkeypatch.setenv("AGENTGATE_ENV", "production")
+    get_settings.cache_clear()
+
+    try:
+        with pytest.raises(ValueError, match="AGENTGATE_AUTH_ENABLED=false"):
+            get_settings()
+    finally:
+        get_settings.cache_clear()
+
+
+def test_disabled_auth_is_allowed_in_development(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENTGATE_AUTH_ENABLED", "false")
+    monkeypatch.setenv("AGENTGATE_ENV", "development")
+    get_settings.cache_clear()
+
+    try:
+        assert get_settings().auth_enabled is False
+    finally:
+        get_settings.cache_clear()

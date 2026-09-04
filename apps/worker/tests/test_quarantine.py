@@ -1,3 +1,6 @@
+import os
+import sys
+import types
 from pathlib import Path
 from uuid import uuid4
 
@@ -6,6 +9,7 @@ import pytest
 from agentgate_worker.client import WorkspaceContext
 from agentgate_worker.quarantine import (
     QuarantineService,
+    _move_without_replace,
     recover_incomplete_journal,
 )
 
@@ -75,3 +79,28 @@ def test_incomplete_journal_requires_manual_review(tmp_path: Path) -> None:
 
     assert len(notices) == 1
     assert notices[0].decision == "manual_review_required"
+
+
+def test_windows_move_uses_flag_from_win32file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    source = tmp_path / "source.txt"
+    destination = tmp_path / "destination.txt"
+    source.write_bytes(b"stable")
+    flags: list[int] = []
+
+    def move_file_ex(source_name: str, destination_name: str, move_flags: int) -> None:
+        flags.append(move_flags)
+        os.rename(source_name, destination_name)
+
+    monkeypatch.setitem(sys.modules, "win32con", types.SimpleNamespace())
+    monkeypatch.setitem(
+        sys.modules,
+        "win32file",
+        types.SimpleNamespace(MOVEFILE_WRITE_THROUGH=8, MoveFileEx=move_file_ex),
+    )
+
+    _move_without_replace(source, destination)
+
+    assert flags == [8]
+    assert destination.read_bytes() == b"stable"

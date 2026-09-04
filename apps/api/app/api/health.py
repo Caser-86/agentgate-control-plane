@@ -22,5 +22,6 @@ def meta(_: OperatorDep) -> dict[str, str]:
     return {
         "provider": settings.llm_provider,
         "model": settings.llm_model,
+        "api_base_url": settings.api_base_url,
         "status": "ok",
     }

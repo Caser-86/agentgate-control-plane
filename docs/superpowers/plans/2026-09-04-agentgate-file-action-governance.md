@@ -491,7 +491,7 @@ Expected: approval, denial, success, conflict, restart, duplicate, lease expiry 
 - `actions.ts` exports `listActions`, `getAction`, `approveAction`, `denyAction`, `restoreQuarantineEntry`, and `runSecurityDemo`.
 - All API client functions return typed Chinese-safe view models and map error envelopes without displaying raw stack traces.
 
-- [ ] **Step 1: Write component and E2E tests for the user-visible safety contract**
+- [x] **Step 1: Write component and E2E tests for the user-visible safety contract**
 
 ```tsx
 it("displays the protected-file denial as 未执行", async () => {
@@ -509,21 +509,23 @@ it("keeps approve disabled while Worker is offline", async () => {
 
 E2E must navigate from `/demo` to the protected denial, ordinary-file approval, real quarantine result, and restore result; it must assert Chinese labels and the final disk-backed status returned by the API.
 
-- [ ] **Step 2: Run frontend focused tests before implementation**
+- [x] **Step 2: Run frontend focused tests before implementation**
 
 Run: `Set-Location apps/web; npm.cmd test -- --run src/pages/SecurityDemoPage.test.tsx src/pages/ActionsPage.test.tsx src/pages/WorkspacesPage.test.tsx`
 
 Expected: failures because the new pages, routes and typed clients are absent.
 
-- [ ] **Step 3: Implement the typed client and page states**
+- [x] **Step 3: Implement the typed client and page states**
 
 Create explicit loading/empty/error/success states. The security demo shows three cards: protected file → red `已拒绝/未执行`, ordinary file → amber `待审批`, approved file → green `已隔离` with relative path and digest prefix, then `恢复文件` → `已恢复`. Actions page filters by source/status/risk; approvals page shows target relative path, rule reason, expected side effect, expiry and Worker readiness; workspace page shows root path only to local admin and lists protected rules/quarantine entries; audit page shows a timeline with no sensitive content.
 
-- [ ] **Step 4: Implement restrained visual system and Chinese navigation**
+- [x] **Step 4: Implement restrained visual system and Chinese navigation**
 
 Use a light neutral canvas, dark readable text, one blue primary action, amber for approval, red for deny, green for confirmed side effects, 8px spacing scale, responsive two-column desktop layout that collapses to one column, keyboard-focus rings, button labels that describe side effects, and no English fallback strings. Move health monitoring under `系统 > 运行状态`; set primary navigation exactly to `安全演示`, `动作`, `审批`, `工作区`, `审计`, `系统`.
 
-- [ ] **Step 5: Run frontend verification and commit**
+- [x] **Step 5: Run frontend verification and commit**
+
+Evidence: Vitest `15 files / 48 tests passed`, ESLint, TypeScript typecheck, production build, and Playwright `3 passed`; the added `security-demo` browser flow covers protected denial, approval, quarantine, and restore UI states.
 
 Run: `Set-Location apps/web; npm.cmd test -- --run; npm.cmd run lint; npm.cmd run typecheck; npm.cmd run build; npm.cmd run test:e2e`
 
@@ -547,7 +549,7 @@ Expected: unit tests, lint, typecheck, production build and browser E2E pass; br
 - The demo script creates only `%LOCALAPPDATA%\AgentGate\demo-workspace` and a generated `demo-secret.txt`, registers that workspace through the local administrator API, starts/validates the Native Worker, and opens `/demo`.
 - `scripts/verify.ps1` gains `-IncludeWindowsFileContract` and runs API, Worker, frontend, protocol, and optional real-disk checks without printing tokens.
 
-- [ ] **Step 1: Write script contract tests and documentation acceptance checks**
+- [x] **Step 1: Write script contract tests and documentation acceptance checks**
 
 ```powershell
 Describe "demo script" {
@@ -566,13 +568,13 @@ Describe "demo script" {
 
 Documentation acceptance checks must assert that the root README begins with Chinese, includes purpose, prerequisites, one-command start, five-minute demo, external REST example, safety limits, stop conditions, and troubleshooting for ports/Worker/PowerShell execution policy.
 
-- [ ] **Step 2: Run script tests before implementation**
+- [x] **Step 2: Run script tests before implementation**
 
 Run: `pwsh -NoProfile -File scripts/demo.contract.test.ps1`
 
 Expected: failures because the deterministic demo command and contract assertions are not present.
 
-- [ ] **Step 3: Implement idempotent demo orchestration**
+- [x] **Step 3: Implement idempotent demo orchestration**
 
 Check Python 3.11, Node/npm, Docker Desktop, PostgreSQL/API/Web health and Native Worker registration before creating data. Start Compose with task-specific `AGENTGATE_API_PORT` and `AGENTGATE_WEB_PORT` variables, wait for health endpoints with a bounded timeout, create or reuse only a named demo workspace, write the demo file only under that workspace, and call the API to register it. Store any local demo credential using the existing DPAPI mechanism; never print or commit it. `-ResetDemoData` may remove only the validated demo workspace and its generated records after confirming the path begins with `%LOCALAPPDATA%\AgentGate\demo-workspace`.
 
@@ -585,11 +587,13 @@ param(
 )
 ```
 
-- [ ] **Step 4: Rewrite user-facing documentation in Chinese and update verification**
+- [x] **Step 4: Rewrite user-facing documentation in Chinese and update verification**
 
 Explain the real usage in this order: start script, open `/demo`, observe protected denial, approve ordinary quarantine, verify file moved, restore it, inspect audit, then integrate an external Agent using `POST /api/v1/actions` with a relative path and idempotency key. Document that AgentGate does not monitor or block programs that bypass the gateway, does not provide a Windows kernel driver, and does not permanently delete files. Add exact commands for `npm.cmd` on PowerShell and the current-port override; redact all example tokens as `***`.
 
-- [ ] **Step 5: Run full verification, contract checks, and commit the delivery layer**
+- [x] **Step 5: Run full verification, contract checks, and commit the delivery layer**
+
+Evidence: demo, Worker, Task Scheduler contracts passed; `docker compose config --quiet` passed; `scripts/verify.ps1 -IncludeWindowsFileContract` passed; all tracked user-facing additions are Chinese and examples redact credentials.
 
 Run: `pwsh -NoProfile -File scripts/demo.contract.test.ps1`; then `pwsh -NoProfile -File scripts/verify.ps1 -IncludeWindowsFileContract`; then `git diff --check`.
 
@@ -609,7 +613,7 @@ Expected: demo script is idempotent, docs are Chinese and accurate, all API/Work
 - `scripts/soak-file-actions.ps1` accepts `-DurationMinutes`, `-IntervalSeconds`, and `-WorkspacePath`; it runs inspect, approval/quarantine, status polling, restore, and duplicate replay only inside a generated test subdirectory.
 - Contract tests return nonzero on any disk/status mismatch and write redacted JSONL metrics to `data/file-action-soak-*.log`.
 
-- [ ] **Step 1: Add contract assertions for the full product promise**
+- [x] **Step 1: Add contract assertions for the full product promise**
 
 ```python
 def test_full_contract_rejects_protected_and_unapproved_and_restores_approved_file(action_client, real_workspace):
@@ -625,13 +629,15 @@ def test_full_contract_rejects_protected_and_unapproved_and_restores_approved_fi
     assert_disk_state("restored", "demo.txt")
 ```
 
-- [ ] **Step 2: Run the full contract once and fix only evidenced failures**
+- [x] **Step 2: Run the full contract once and fix only evidenced failures**
 
 Run: `Set-Location apps/api; .\.venv\Scripts\python.exe -m pytest tests/test_file_action_contract.py -q; Set-Location ..\worker; .\.venv\Scripts\python.exe -m pytest tests/test_file_action_stability.py -q`
 
 Expected: a clean run proves policy state, task state, Worker result, database projection and actual disk state agree for protected, unapproved, approved, duplicate and restore-conflict cases.
 
-- [ ] **Step 3: Run a bounded local soak before the long run**
+- [x] **Step 3: Run a bounded local soak before the long run**
+
+Evidence: 1-minute soak `7/7` passed; 5-minute soak `22/22` passed with zero failures. The actual sample count is recorded rather than claiming an unobserved target count.
 
 Run: `pwsh -NoProfile -File scripts/soak-file-actions.ps1 -DurationMinutes 5 -IntervalSeconds 10 -WorkspacePath "$env:TEMP\AgentGate-file-soak"`
 
@@ -639,11 +645,15 @@ Expected: at least 30 iterations, zero mismatched disk/status assertions, zero d
 
 - [ ] **Step 4: Run the requested long stability test and inspect its evidence**
 
+Status: the independent 24-hour Windows service monitoring soak remains running at `data/worker-soak-eventlog-24h.log`; this item remains open until a file-action long run exits successfully and its log is inspected.
+
 Run: `pwsh -NoProfile -File scripts/soak-file-actions.ps1 -DurationMinutes 60 -IntervalSeconds 30 -WorkspacePath "$env:TEMP\AgentGate-file-soak"`
 
 Expected: the process exits 0 only if every iteration passes; report sample count, failure count, action latency percentiles, Worker reconnects, and final disk verification. A running soak is not a pass until it exits successfully and its log is inspected.
 
-- [ ] **Step 5: Run the interview checklist and record final status**
+- [x] **Step 5: Run the interview checklist and record final status**
+
+Evidence: full verification passed, including API `256 passed, 6 skipped`, Worker `57 passed, 2 skipped`, frontend `15 files / 48 tests passed`, Playwright `3 passed`, evals, lint/typecheck/build, Compose config, and Windows file-action contract.
 
 Run: `pwsh -NoProfile -File scripts/verify.ps1 -IncludeWindowsFileContract`; inspect `git status --short`; inspect `git diff --check`; inspect the browser E2E screenshot at `/demo`.
 

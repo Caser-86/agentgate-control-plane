@@ -1,12 +1,14 @@
 param(
     [ValidateSet("mock", "openai_compatible")]
-    [string]$Provider = "mock"
+    [string]$Provider
 )
 
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $repoRoot
-$env:AGENTGATE_LLM_PROVIDER = $Provider
+if ($PSBoundParameters.ContainsKey("Provider")) {
+    $env:AGENTGATE_LLM_PROVIDER = $Provider
+}
 
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
     throw "Docker Desktop is required for the Compose foundation."
@@ -52,5 +54,7 @@ while ((Get-Date) -lt $deadline) {
     } catch { Start-Sleep -Seconds 2 }
 }
 if (-not $healthy) { throw "AgentGate API did not become healthy within 60 seconds." }
-Write-Host "AgentGate foundation is ready at http://127.0.0.1:$webPort (provider: $Provider)."
+$resolvedProvider = [string]$config.services.api.environment.AGENTGATE_LLM_PROVIDER
+if ([string]::IsNullOrWhiteSpace($resolvedProvider)) { $resolvedProvider = "mock" }
+Write-Host "AgentGate foundation is ready at http://127.0.0.1:$webPort (provider: $resolvedProvider)."
 Write-Host "Frontend development commands must use npm.cmd on Windows."

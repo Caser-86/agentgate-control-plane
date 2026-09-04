@@ -33,6 +33,9 @@ services:
       AGENTGATE_DATABASE_URL: postgresql+psycopg://agentgate:${AGENTGATE_POSTGRES_PASSWORD:-agentgate}@postgres:5432/agentgate
       AGENTGATE_API_PORT: ${AGENTGATE_API_PORT:-8000}
       AGENTGATE_WEB_PORT: ${AGENTGATE_WEB_PORT:-5173}
+      AGENTGATE_ENV: ${AGENTGATE_ENV:-development}
+      AGENTGATE_AUTH_ENABLED: ${AGENTGATE_AUTH_ENABLED:-false}
+      AGENTGATE_WORKSPACE_ALLOWED_ROOT: ${AGENTGATE_WORKSPACE_ALLOWED_ROOT:-C:\AgentGate\workspaces}
     volumes:
       - ./data:/app/data
     depends_on:

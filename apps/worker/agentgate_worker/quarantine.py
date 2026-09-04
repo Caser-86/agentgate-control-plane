@@ -85,10 +85,13 @@ def _read_journal(path: Path) -> list[dict[str, object]]:
 
 def _move_without_replace(source: Path, destination: Path) -> None:
     try:
-        import win32con  # type: ignore[import-untyped]
         import win32file  # type: ignore[import-untyped]
 
-        win32file.MoveFileEx(str(source), str(destination), win32con.MOVEFILE_WRITE_THROUGH)
+        win32file.MoveFileEx(
+            str(source),
+            str(destination),
+            win32file.MOVEFILE_WRITE_THROUGH,
+        )
     except ImportError:
         try:
             os.rename(source, destination)

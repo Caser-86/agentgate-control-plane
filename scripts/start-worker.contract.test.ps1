@@ -16,4 +16,11 @@ $remote = & pwsh -NoProfile -File $worker -ApiUrl "https://example.com:18000" 2>
 if ($LASTEXITCODE -eq 0 -or ($remote -join "`n") -notmatch "Remote API targets are not supported") { throw "Remote API URL was not rejected." }
 $matching = & pwsh -NoProfile -File $worker -ApiUrl "http://127.0.0.1:18000" -ApiPort 18000 2>&1
 if ($LASTEXITCODE -eq 0 -or ($matching -join "`n") -notmatch "one-time worker enrollment token is required") { throw "Matching ApiUrl/ApiPort did not proceed to worker startup with a failure exit code." }
+if ($workerSource -notmatch '(?s)\$workerArgs\s*=\s*@\(.*?--state-dir.*?\).*?if \(\-not \[string\]::IsNullOrWhiteSpace\(\$EnrollmentToken\)\).*?\$workerArgs\s*\+=\s*@\(.*?\).*?& \$python @workerArgs') {
+    throw "Worker startup must append --enrollment-token only when a non-empty token is available."
+}
+if ($workerSource -notmatch '\[switch\]\$Continuous' -or
+    $workerSource -notmatch '(?s)\$Continuous.*?--loop.*?--poll-seconds.*?--heartbeat-seconds') {
+    throw "Worker startup must expose continuous mode and its timing arguments."
+}
 Write-Output "start-worker contract checks passed"

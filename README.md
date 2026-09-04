@@ -4,7 +4,7 @@ AgentGate 是一个面向本机运行的 AI Agent 操作治理平台。它把 Ag
 
 > 当前版本：Phase 1，本地控制流与只读监控 MVP
 >
-> 当前默认模型：`mock` 确定性提供方
+> 仓库默认模型：`mock` 确定性提供方；本机可在 `.env` 中切换为 Ark 等真实模型
 >
 > 当前部署方式：Windows + Docker Compose + 本机浏览器
 
@@ -50,6 +50,7 @@ AgentGate 是一个面向本机运行的 AI Agent 操作治理平台。它把 Ag
 - 运行状态、审批决定、工具结果和审计事件保存到 PostgreSQL。
 - 运行中断后，可以根据检查点和持久化队列继续处理。
 - 可以通过原生 Worker 只读检查本机 HTTP 地址和 Windows 服务，并按失败/恢复阈值生成事件。
+- 原生 Worker 支持持续轮询、心跳保活和 journal 恢复，也可以配置为 Windows 当前用户登录时自动启动。
 - 审计接口和界面会递归脱敏敏感字段。
 
 因此，AgentGate 更接近“AI Agent 的安全控制平面、审批队列和审计台”，而不是一个新的大模型聊天窗口。
@@ -60,12 +61,15 @@ AgentGate 是一个面向本机运行的 AI Agent 操作治理平台。它把 Ag
 
 - 不提供通用聊天、搜索、RAG、情报收集或报告生成。
 - 不会自动发现并监控电脑上所有 Agent；Agent 必须通过 AgentGate 的界面或 API 接入。
+- 不会因为启动了 Worker 就自动扫描进程、窗口、端口或电脑上的其他软件；只有在“监控”页面登记的目标才会被检查。
 - 不会在当前版本中真正重启 Windows 服务；监控只读取服务状态。
 - 不允许任意执行 Shell、PowerShell 或其他命令。
-- 不允许任意读写文件。
+- 不提供 Windows 内核驱动，也不会拦截绕过 AgentGate 的进程。
+- 文件动作只支持受管工作区内的检查、隔离和恢复；不允许任意越界读写。
+- 文件隔离是可恢复的移动，不是永久删除；恢复遇到目标冲突时会停止并要求人工处理。
 - 不会真正轮换 API 密钥或其他凭据。
 - `mock` 提供方不是具备真实推理能力的生产模型。
-- 外部 Agent 的 `/api/v1/actions` 当前用于策略预检，返回允许、需要审批或拒绝，不等于已经进入执行队列。
+- 外部 Agent 的 `/api/v1/actions` 对文件动作会进入统一策略、审批和 Native Worker 队列；通用业务工具仍可只做策略预检。
 
 当前演示里的 `payments-api` 和 `orders-api` 是数据库中的服务状态记录。调用 `restart_service` 只会把演示服务状态改为 `healthy` 并增加 `restart_count`，不会操作操作系统中的同名服务。
 
@@ -108,14 +112,16 @@ flowchart TD
 
 ### 4.1 Web 控制台
 
-登录后可以看到三个主要页面：
+登录后可以看到六个主要页面：
 
 | 页面 | 用途 |
 | --- | --- |
-| `运行` | 创建 Agent 运行、查看状态、打开运行详情和审批动作 |
-| `策略` | 查看已登记工具、风险等级、只读属性和策略决定 |
+| `安全演示` | 一次看清受保护文件拒绝、普通文件审批、隔离和恢复 |
+| `动作` | 按来源、状态和风险筛选已提交动作，显示相对路径和脱敏结果 |
+| `审批` | 查看待审批队列，Worker 在线时批准执行或拒绝 |
+| `工作区` | 登记允许 Worker 操作的本机目录，查看保护规则和隔离记录 |
 | `审计` | 按运行 ID、执行者或事件类型筛选审计事件，并导出 JSON |
-| `监控` | 登记本机 HTTP/Windows 服务，查看健康状态、探测结果和活动事件 |
+| `系统` | 查看运行状态、策略、原有 Agent 运行和本机只读监控入口 |
 
 界面默认使用中文；工具名、状态值和事件类型会同时保留必要的英文代码，便于与 API、日志和测试对应。
 
@@ -129,20 +135,33 @@ flowchart TD
 | `rotate_api_key` | 高 | 否 | 拒绝 | 永远不会在本地演示中执行 |
 | `platform.self_check` | 低 | 是 | 自动批准 | 原生 Worker 协议自检，不执行 Shell 或文件操作 |
 
-### 4.3 本机只读监控
+### 4.3 受管文件动作
+
+文件动作是本项目目前最适合面试展示的真实闭环：外部 Agent 只能提交相对路径，策略先拒绝 `.env` 等保护规则；普通文件必须经过管理员批准，再由 Windows Native Worker 在受管工作区内隔离，最后可以恢复。每一步都保存动作状态、文件 SHA-256 摘要、审批和审计游标。
+
+| 动作 | 默认决定 | 实际效果 |
+| --- | --- | --- |
+| `file.inspect.v1` | 自动批准 | 只读返回文件存在性、大小和摘要，不返回内容 |
+| `file.quarantine.v1` 访问 `.env`、`.git/**` 等 | 直接拒绝 | 不创建任务，不移动文件 |
+| `file.quarantine.v1` 访问普通文件 | 需要审批 | 批准后在同一卷的隔离区内移动，并保留摘要 |
+| `file.restore.v1` | 需要审批 | 批准后恢复原相对路径；目标已有文件时不覆盖 |
+
+这条边界只对“经过 AgentGate API 的动作”生效。没有接入 AgentGate 的程序，或者直接绕过网关修改文件，当前版本无法拦截。
+
+### 4.4 本机只读监控
 
 进入“监控”页面后，可以添加两种目标：
 
 | 类型 | 填写内容 | 检查行为 |
 | --- | --- | --- |
-| HTTP 地址 | `http://127.0.0.1:8000/health` | 发送受限 HTTP 请求，只记录状态码和耗时，不保存响应正文 |
+| HTTP 地址 | 默认 `http://127.0.0.1:8000/health`；自定义端口按当前 API 配置填写 | 发送受限 HTTP 请求，只记录状态码和耗时，不保存响应正文 |
 | Windows 服务 | `AgentGateWorker` | 固定执行 `sc.exe query AgentGateWorker`，只读取服务状态 |
 
 安全限制：地址只能使用 `localhost`、`127.0.0.1` 或 `::1`；服务名只能使用字母、数字、点、下划线和短横线。间隔为 5 秒至 24 小时，超时为 1 至 30 秒。系统不会执行任意 Shell/PowerShell，也不会自动重启服务。
 
 失败达到“失败阈值”后，目标显示“故障”并只创建一个活动事件；恢复达到“恢复阈值”后自动关闭事件。探针自身无法可靠执行时显示“未知”，不会把目标误报为故障。
 
-### 4.4 运行状态
+### 4.5 运行状态
 
 一次运行可能经过以下状态：
 
@@ -209,14 +228,16 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\setup-local.ps
 3. 安装 Web 依赖。
 4. 启动 PostgreSQL。
 5. 执行数据库迁移。
-6. 以 `mock` 提供方启动 API、scheduler、control-worker 和 Web。
+6. 按 `.env` 中的提供方启动 API、scheduler、control-worker 和 Web；未配置时使用 `mock`。
 7. API 健康检查通过后打开本地控制台。
 
-脚本只打印 bootstrap token 的文件路径，不会把 token 内容打印到终端。首次初始化时，需要在本机受信任的 PowerShell 中读取该文件：
+只有启用密码认证时，首次初始化才需要读取 bootstrap token。脚本只打印文件路径，不会把 token 内容打印到终端：
 
 ```powershell
 Get-Content .\data\bootstrap-token
 ```
+
+当前默认免密模式不需要执行上面的读取步骤；启用 `AGENTGATE_AUTH_ENABLED=true` 后才需要使用它完成管理员初始化。
 
 不要把这个 token、管理员密码或模型 API key 发送到聊天、截图、日志或 Git 仓库。
 
@@ -267,11 +288,50 @@ Set-Location 'D:\LLM Files\files\agentgate-control-plane'
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\migrate-local.ps1
 ```
 
+### 6.6 一键本地演示（推荐）
+
+如果你想快速看到项目真正保护文件的效果，在项目根目录执行：
+
+```powershell
+Set-Location 'D:\LLM Files\files\agentgate-control-plane'
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\demo.ps1
+```
+
+脚本会在 `%LOCALAPPDATA%\AgentGate\demo-workspace` 下准备演示文件，临时使用当前命令的端口覆盖启动配置，确认 API 和 Native Worker 在线，登记或复用这个工作区，然后打开 `/demo`。它不会覆盖 `.env`，不会打印 Worker 引导令牌、Bearer token、管理员密码或模型 API key。
+
+如果端口被占用，可以显式指定：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\demo.ps1 -ApiPort 18230 -WebPort 15173
+```
+
+`-ResetDemoData` 只会删除演示工作区中脚本生成的 `demo.txt` 和 `demo-secret.txt`，不会删除数据库、审计记录或其他目录；`-NoBrowser` 适合自动化验收。
+
 迁移由 Alembic 执行，生产代码不会用 `create_all()` 偷偷创建或覆盖数据库结构。
 
 ## 七、首次初始化和登录
 
+### 7.0 本机免密模式（当前默认）
+
+为了方便单人本机使用，Compose 默认使用 `AGENTGATE_ENV=development` 和 `AGENTGATE_AUTH_ENABLED=false`。在这个模式下：
+
+- 打开 Web 地址会直接进入控制台，不需要管理员密码。
+- 运行、审批、审计和监控等 Web 管理功能可以直接使用。
+- 外部 Agent 的 Bearer client token、原生 Worker 的 enrollment token 和 Worker token 仍然需要，不会因为取消 Web 密码而取消。
+- 免密模式只允许在 `AGENTGATE_ENV=development` 下运行；API 和 Web 仍只发布到 `127.0.0.1`，不要用于远程访问或生产环境。
+
+以后需要恢复密码登录时，在项目根目录执行：
+
+```powershell
+$env:AGENTGATE_AUTH_ENABLED = 'true'
+docker compose up -d --build --force-recreate api web
+```
+
+如果要持久启用密码登录，也把项目根目录 `.env` 中的 `AGENTGATE_AUTH_ENABLED` 改为 `true`。恢复免密时改回 `false`，再执行同一条 Compose 命令。当前实现保留了完整的初始化、登录、会话和 CSRF 流程。
+
 ### 7.1 第一次使用
+
+只有在 `AGENTGATE_AUTH_ENABLED=true` 时才需要以下初始化步骤：
 
 1. 打开 Web 地址。
 2. 页面显示“初始化管理员密码”时，读取本机 `data/bootstrap-token`。
@@ -290,13 +350,26 @@ bootstrap token 是一次性、短时有效的初始化凭据。初始化完成�
 
 ### 7.3 认证方式
 
-- Web 使用 HttpOnly 会话 Cookie。
-- 修改状态的 Web 请求需要 CSRF token。
+- `AGENTGATE_AUTH_ENABLED=false` 时，Web 管理员认证关闭，使用固定的临时本地操作员身份记录审计，不会写入密码。
+- `AGENTGATE_AUTH_ENABLED=true` 时，Web 使用 HttpOnly 会话 Cookie，修改状态的请求需要 CSRF token。
 - 外部 Agent 使用带 scope 的 Bearer client token。
 - 原生 Worker 使用单独的 enrollment token 和 Worker token。
 - 管理员密码不会以明文存储。
 
 ## 八、完成第一次演示
+
+### 8.0 真实文件安全演示（面试推荐）
+
+完成上一节的一键准备后，按以下顺序操作：
+
+1. 打开“安全演示”，确认工作区是 `AgentGate 安全演示工作区`。
+2. 点击“开始安全演示”。`.env` 会显示为“已拒绝/未执行”，普通 `demo.txt` 会显示为“待审批”。
+3. 进入“审批”，检查相对路径、规则原因、风险和 Worker 在线状态。
+4. 点击“批准并执行”，等待动作变成“已隔离”；此时 `demo.txt` 已经从原位置移动到同卷隔离区，页面只显示相对路径和摘要前缀。
+5. 点击“恢复文件”，等待动作变成“已恢复”，确认原位置恢复且内容摘要一致。
+6. 进入“审计”，展示拒绝、审批、任务、隔离和恢复的时间线。
+
+这个演示展示的是实际 Windows 磁盘状态，不是 Mock 成功提示。它不会删除 `.env`，不会返回文件内容，也不会覆盖恢复目标已有的文件。
 
 ### 8.1 查看策略
 
@@ -423,14 +496,15 @@ token 创建接口是管理员接口 `POST /api/auth/tokens`，需要管理员�
 
 ### 10.3 外部 API 摘要
 
-以下接口都位于本地 API，例如默认地址 `http://127.0.0.1:8000`：
+以下接口都位于本地 API，例如默认地址 `http://127.0.0.1:8000`。文件治理的入口是 `POST /api/v1/actions`，它接收相对路径和幂等键，并把文件动作送入策略、审批与 Native Worker 队列：
 
 | 方法 | 路径 | 认证 | 当前用途 |
 | --- | --- | --- | --- |
 | `POST` | `/api/v1/events` | `propose:events` | 记录外部 Agent 事件 |
 | `POST` | `/api/v1/checks` | `propose:checks` | 提交只读控制检查 |
 | `GET` | `/api/v1/checks/{id}` | `propose:checks` | 查询检查任务状态 |
-| `POST` | `/api/v1/actions` | `propose:actions` | 预检动作策略 |
+| `POST` | `/api/v1/actions` | `propose:actions` | 文件动作进入策略、审批和 Worker 队列；其他工具返回预检决定 |
+| `GET` | `/api/v1/actions/{id}` | `propose:actions` | 查询同一 client 提交的文件动作状态 |
 | `GET` | `/api/monitor/targets` | 管理员会话 | 查看监控目标 |
 | `POST` | `/api/monitor/targets` | 管理员会话 + CSRF | 登记本机只读监控目标 |
 | `POST` | `/api/monitor/targets/{id}/probe` | 管理员会话 + CSRF | 手动排队一次探测 |
@@ -464,7 +538,25 @@ Invoke-RestMethod `
 }
 ```
 
-这只是策略结果，不会替外部 Agent 创建 Web 运行，也不会自动执行重启。当前版本如果要完整体验“运行—审批—恢复”流程，应使用 Web 控制台的 `/api/runs` 流程。后续版本可以把外部动作提议接入统一的持久化审批队列。
+对于文件治理，外部 Agent 还必须提供 `Idempotency-Key`，并使用受管工作区 ID 和相对路径：
+
+```powershell
+$headers = @{
+    Authorization = "Bearer ***"
+    "Idempotency-Key" = "interview-demo-001"
+}
+$body = @{
+    action = "file.quarantine.v1"
+    workspace_id = "00000000-0000-0000-0000-000000000000"
+    relative_path = "demo.txt"
+    reason = "需要人工确认的文件隔离"
+} | ConvertTo-Json
+
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:18230/api/v1/actions" `
+  -Headers $headers -ContentType "application/json" -Body $body
+```
+
+返回 `pending_approval` 只表示已进入审批队列；管理员批准后，Native Worker 才会执行。重复发送同一幂等键会返回同一动作，不能触发第二次移动。访问 `.env`、越界路径或未登记工作区会被拒绝。
 
 ### 10.4 事件和检查的请求格式
 
@@ -502,13 +594,15 @@ Invoke-RestMethod `
 - 使用 enrollment token 注册到本地 API。
 - 保存 Worker 凭据和本地 journal。
 - 发送 heartbeat。
-- 领取 `platform.self_check`、`monitor.http` 和 `monitor.windows_service` 任务。
+    - 领取 `platform.self_check`、`monitor.http`、`monitor.windows_service` 和受控文件动作任务。
 - 把安全自检或结构化探测结果报告回控制平面。
+- 持续模式下会重复轮询任务、定期发送心跳；暂时连不上本地 API 时会使用最大 30 秒的退避重试。
+- 前端侧栏会显示本机 Worker 的心跳状态：在线、需要检查或不可用。
 
 当前 Worker 不支持：
 
 - 任意 Shell 或 PowerShell。
-- 任意文件读写。
+- 受管工作区之外的文件读写；文件能力仅限 `inspect`、`quarantine` 和 `restore`。
 - 启动、停止、重启或修改 Windows 服务。
 - 任意凭据读取或轮换。
 - 远程 API 地址。
@@ -525,6 +619,73 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-worker.p
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-worker.ps1 -ApiUrl http://127.0.0.1:18230
 ```
+
+### 11.1 第一次注册
+
+原生 Worker 的首次注册需要一次性引导令牌。令牌只用于换取本机 Worker 凭据；注册成功后，凭据会保存在 Worker 状态目录中，后续启动不再需要引导令牌。
+
+在项目根目录执行以下命令，把尖括号内容替换为你刚生成的令牌；不要把真实令牌写入脚本、`.env`、任务计划参数或聊天记录：
+
+```powershell
+Set-Location 'D:\LLM Files\files\agentgate-control-plane'
+$env:AGENTGATE_WORKER_ENROLLMENT_TOKEN = '<一次性 Worker 引导令牌>'
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-worker.ps1 `
+  -ApiUrl http://127.0.0.1:18230 `
+  -StateDir .agentgate-worker
+Remove-Item Env:AGENTGATE_WORKER_ENROLLMENT_TOKEN
+```
+
+上面的命令完成一次注册并执行一轮任务后退出。若侧栏已经显示 Worker 在线，说明注册和心跳已经成功。
+
+### 11.2 持续运行和登录自启动
+
+先完成一次注册，再选择手动持续运行或 Windows 登录自启动。手动持续运行适合调试：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-worker.ps1 `
+  -Continuous `
+  -ApiUrl http://127.0.0.1:18230 `
+  -StateDir .agentgate-worker
+```
+
+配置当前 Windows 用户登录时自动启动（会创建并立即启动一个计划任务）：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-worker.ps1 `
+  -ApiUrl http://127.0.0.1:18230 `
+  -StateDir .\apps\worker\.agentgate-worker
+```
+
+计划任务只保存本地 API 地址和状态目录，不保存一次性引导令牌或 Worker token；安装前必须已经存在 `credentials.bin`。取消自启动只移除计划任务，不会删除凭据、journal 或监控数据：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\uninstall-worker.ps1
+```
+
+Worker 只处理 AgentGate 已登记的本机 HTTP/Windows 服务监控任务，不会自主发现目标，也不会自动重启服务或执行任意命令。
+
+### 11.3 长时间稳定性测试
+
+项目提供 `scripts/soak-worker.ps1`，只读取本地平台健康检查和一个已登记监控目标，不会执行服务写入、读取凭据或把响应正文发送到外部。脚本默认运行 24 小时，每 30 秒记录一次：API、数据库、队列、Worker 心跳、目标健康状态和最近探测结果。
+
+先在“监控”页面登记目标。若页面没有直接显示 ID，可以在项目根目录执行下面的命令查看已登记目标，再复制需要测试的 `id`：
+
+```powershell
+$targets = Invoke-RestMethod http://127.0.0.1:18230/api/monitor/targets
+$targets | Select-Object name,id,health,last_probe_status
+```
+
+然后执行：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\soak-worker.ps1 `
+  -ApiUrl http://127.0.0.1:18230 `
+  -TargetId '<监控目标 ID>' `
+  -DurationMinutes 1440 `
+  -IntervalSeconds 30
+```
+
+日志默认写入 `data/worker-soak.log`。`PASSED` 表示整个测试期间没有失败样本；短暂失败会被记录为 `COMPLETED_WITH_TRANSIENT_FAILURES`，连续失败达到 3 次时提前结束并返回退出码 2。测试期间可用 `Get-Content .\data\worker-soak.log -Wait` 查看新增样本；不要把日志提交到 Git。
 
 ## 十二、测试与验收
 
@@ -582,16 +743,22 @@ $env:AGENTGATE_E2E_PYTHON = "..\api\.venv\Scripts\python.exe"
 npm.cmd run test:e2e
 ```
 
-E2E 流程会验证登录、任务队列、审批和拒绝分支。它需要能够启动测试 API，并可能使用独立测试端口，不要把 E2E 测试数据库当作正式本地数据。
+E2E 流程会验证登录、任务队列、审批和拒绝分支。它需要能够启动测试 API，并使用独立的临时测试数据库，不要把 E2E 测试数据库当作正式本地数据。如果本机的 `8000` 或 `5173` 已被其他项目占用，可以指定测试端口：
+
+```powershell
+$env:AGENTGATE_E2E_API_PORT = "18300"
+$env:AGENTGATE_E2E_WEB_PORT = "18310"
+npm.cmd run test:e2e
+```
 
 ### 12.6 一键验证脚本
 
 ```powershell
 Set-Location 'D:\LLM Files\files\agentgate-control-plane'
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify.ps1 -IncludeWindowsFileContract
 ```
 
-该脚本包含 API、eval、Web、构建和 E2E 检查。若当前机器缺少 API 虚拟环境、Node 依赖、Docker 或 Playwright 浏览器，应先按前面的准备步骤处理，再重新运行。
+该脚本包含 API、Worker、eval、Web、构建和 E2E 检查；传入 `-IncludeWindowsFileContract` 时还会在系统临时目录执行真实文件隔离/恢复合约。若当前机器缺少 API 虚拟环境、Node 依赖、Docker 或 Playwright 浏览器，应先按前面的准备步骤处理，再重新运行。
 
 ## 十三、常见问题
 
@@ -612,6 +779,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-local.ps
 
 ### 13.2 PowerShell 报 npm.ps1 被禁止运行
 
+这是 PowerShell 执行策略阻止了 `npm.ps1`，本项目只需改用 `npm.cmd`，不需要永久修改系统策略。
+
 使用：
 
 ```powershell
@@ -622,7 +791,13 @@ npm.cmd run build
 
 ### 13.3 登录失败
 
-先判断页面状态：
+如果你使用的是本机默认免密模式，页面不应该要求登录；确认 `AGENTGATE_AUTH_ENABLED=false` 后重建 `api` 和 `web` 服务：
+
+```powershell
+docker compose up -d --build --force-recreate api web
+```
+
+如果你主动启用了密码登录，再判断页面状态：
 
 - 显示“初始化管理员密码”：需要 bootstrap token 和新密码。
 - 显示“登录”：只需要已经设置的管理员密码。
@@ -716,11 +891,16 @@ agentgate-control-plane/
 │  ├─ assets/               截图和文档资源
 │  └─ superpowers/          规格、计划、报告和进度记录
 ├─ scripts/
-│  ├─ setup-local.ps1       首次准备 Worker/Web 依赖并启动 mock
+│  ├─ setup-local.ps1       首次准备 Worker/Web 依赖并按 .env 启动
 │  ├─ start-local.ps1       启动 PostgreSQL、迁移和 Compose 服务
 │  ├─ stop-local.ps1        停止本地服务
 │  ├─ migrate-local.ps1     执行 Alembic 迁移
 │  ├─ start-worker.ps1      启动本机原生 Worker
+│  ├─ install-worker.ps1    安装当前用户登录自启动任务
+│  ├─ uninstall-worker.ps1  移除登录自启动任务（保留 Worker 状态）
+│  ├─ soak-worker.ps1       执行 Worker 和监控目标长时间稳定性测试
+│  ├─ start-worker.contract.test.ps1
+│  ├─ task-scheduler.contract.test.ps1
 │  ├─ verify-foundation.ps1 验证迁移、队列、heartbeat 和 Worker 自检
 │  └─ verify.ps1            执行 API、Web、构建和 E2E 验收
 ├─ compose.yaml              本地 PostgreSQL、API、Worker 和 Web 编排
@@ -764,6 +944,7 @@ agentgate-control-plane/
 2. **Phase 1：真实本机只读监控**（当前已完成 MVP）
    - 已接入本机 HTTP 和 Windows 服务只读探针、周期调度、失败/恢复阈值和事件去重。
    - 已提供中文监控页面、目标登记 API、探测结果和审计记录。
+   - 已支持原生 Worker 持续轮询、心跳保活、断线退避、journal 恢复和 Windows 登录自启动。
    - 下一步应补充 24 小时稳定性验收、监控历史聚合和告警通知，但不能先放开写入型动作。
 
 3. **Phase 2：外部 Agent 统一接入**

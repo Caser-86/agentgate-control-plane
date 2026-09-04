@@ -37,6 +37,11 @@ def test_api_and_web_bind_only_to_loopback() -> None:
     assert '"127.0.0.1:${AGENTGATE_WEB_PORT:-5173}:80"' in COMPOSE
 
 
+def test_compose_exposes_local_auth_toggle_with_a_disabled_default() -> None:
+    assert "AGENTGATE_AUTH_ENABLED: ${AGENTGATE_AUTH_ENABLED:-false}" in COMPOSE
+    assert "AGENTGATE_ENV: ${AGENTGATE_ENV:-development}" in COMPOSE
+
+
 def test_alternate_ports_render_consistently_through_compose() -> None:
     env = os.environ.copy()
     env.pop("AGENTGATE_API_BASE_URL", None)
@@ -84,6 +89,20 @@ def test_local_scripts_derive_configured_host_ports() -> None:
         assert "AGENTGATE_WEB_PORT" in script
     assert '"http://127.0.0.1:8000/health"' not in start_script
     assert '"http://localhost:5173"' not in setup_script
+
+
+def test_local_setup_respects_env_provider_unless_explicitly_overridden() -> None:
+    start_script = (REPO_ROOT / "scripts/start-local.ps1").read_text(encoding="utf-8")
+    setup_script = (REPO_ROOT / "scripts/setup-local.ps1").read_text(encoding="utf-8")
+    assert 'if ($PSBoundParameters.ContainsKey("Provider"))' in start_script
+    assert '& (Join-Path $PSScriptRoot "start-local.ps1") -Provider "mock"' not in setup_script
+    assert 'if ($PSBoundParameters.ContainsKey("Provider"))' in setup_script
+
+
+def test_local_setup_explains_auth_mode_before_printing_bootstrap_instructions() -> None:
+    setup_script = (REPO_ROOT / "scripts/setup-local.ps1").read_text(encoding="utf-8")
+    assert "AGENTGATE_AUTH_ENABLED" in setup_script
+    assert "当前为本机免密模式，无需 bootstrap-token。" in setup_script
 
 
 def test_foundation_verification_uses_worker_environment_with_worker_dependencies() -> None:
@@ -153,6 +172,12 @@ def test_foundation_verification_delegates_worker_start_to_safe_script() -> None
     script = (REPO_ROOT / "scripts/verify-foundation.ps1").read_text(encoding="utf-8")
     assert 'scripts\\start-worker.ps1' in script
     assert "agentgate_worker.main" not in script
+
+
+def test_verify_script_separates_e2e_api_and_web_ports() -> None:
+    script = (REPO_ROOT / "scripts/verify.ps1").read_text(encoding="utf-8")
+    assert '$env:AGENTGATE_E2E_API_PORT = "18000"' in script
+    assert '$env:AGENTGATE_E2E_WEB_PORT = "18100"' in script
 
 
 def test_built_web_uses_runtime_config_without_stale_port_fallback() -> None:

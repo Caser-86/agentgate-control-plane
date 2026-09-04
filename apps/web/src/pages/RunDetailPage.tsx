@@ -5,6 +5,7 @@ import type { RunDetail } from "../types";
 import { ApprovalCard } from "../components/ApprovalCard";
 import { RunTimeline } from "../components/RunTimeline";
 import { StatusBadge } from "../components/StatusBadge";
+import { SignalTrack } from "../components/SignalTrack";
 import { useRunEvents } from "../hooks/useRunEvents";
 import { reasonLabel, toolLabel } from "../i18n/zh-CN";
 
@@ -30,11 +31,13 @@ export function RunDetailPage() {
   if (error) return <div className="page-shell"><Link className="back-link" to="/">← 返回运行列表</Link><div className="error-panel"><span className="eyebrow">安全错误</span><h1>运行暂时不可用</h1><p>无法加载该运行详情，请稍后重试。</p></div></div>;
   if (!detail) return <div className="page-shell"><div className="loading-row" aria-live="polite">正在加载运行详情…</div></div>;
   const pending = detail.actions.find((action) => action.status === "pending_approval");
+  const activeStage = detail.status === "completed" ? 4 : pending ? 2 : detail.status === "running" ? 3 : detail.status === "failed" ? 3 : 0;
 
   return (
     <div className="page-shell detail-page">
       <Link className="back-link" to="/">← 返回运行列表</Link>
       <div className="page-heading detail-heading"><div><span className="eyebrow">运行详情 / <span translate="no">{detail.id.slice(0, 8)}</span></span><h1>操作轨迹</h1><p>{detail.user_request}</p></div><div className="detail-status" data-testid="run-status"><StatusBadge value={detail.status} /><span className={connection === "reconnecting" ? "reconnecting" : "live-status"} aria-live="polite">{connection === "reconnecting" ? "正在重连事件流" : "事件流已连接"}</span></div></div>
+      <SignalTrack activeStage={activeStage} />
       {pending && <ApprovalCard action={pending} onApprove={async () => { const updated = await api.approveAction(pending.id, {}); setDetail((current) => current ? { ...current, actions: current.actions.map((item) => item.id === updated.id ? updated : item) } : current); await load(); }} onDeny={async () => { const updated = await api.denyAction(pending.id, {}); setDetail((current) => current ? { ...current, actions: current.actions.map((item) => item.id === updated.id ? updated : item) } : current); await load(); }} onRefresh={() => void load()} />}
       <div className="detail-grid">
         <section className="panel timeline-panel"><div className="section-heading"><div><span className="eyebrow">时间线 / 按时间排序</span><h2>决策时间线</h2></div><span className="mono-note">{detail.audit_events.length.toString().padStart(2, "0")} 个事件</span></div><RunTimeline events={detail.audit_events} /></section>

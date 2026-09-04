@@ -6,9 +6,26 @@ import path from "node:path";
 const pythonCommand = process.env.AGENTGATE_E2E_PYTHON ?? "python";
 const pythonExecutable = pythonCommand.includes(" ") ? `"${pythonCommand}"` : pythonCommand;
 const requestedApiPort = Number(process.env.AGENTGATE_E2E_API_PORT ?? "8000");
+const requestedWebPort = Number(process.env.AGENTGATE_E2E_WEB_PORT ?? "5173");
 const projects = [
-  { name: "approval-flow", spec: "approval-flow.spec.ts", apiPort: requestedApiPort, webPort: 5173 },
-  { name: "auth-and-queue", spec: "auth-and-queue.spec.ts", apiPort: requestedApiPort + 1, webPort: 5174 },
+  {
+    name: "approval-flow",
+    spec: "approval-flow.spec.ts",
+    apiPort: requestedApiPort,
+    webPort: requestedWebPort,
+  },
+  {
+    name: "auth-and-queue",
+    spec: "auth-and-queue.spec.ts",
+    apiPort: requestedApiPort + 1,
+    webPort: requestedWebPort + 1,
+  },
+  {
+    name: "security-demo",
+    spec: "security-demo.spec.ts",
+    apiPort: requestedApiPort + 2,
+    webPort: requestedWebPort + 2,
+  },
 ];
 
 const serverState = projects.map((project) => {
@@ -29,6 +46,7 @@ const webServers = serverState.flatMap((project) => {
     ...process.env,
     AGENTGATE_LLM_PROVIDER: "mock",
     AGENTGATE_ENV: "test",
+    AGENTGATE_AUTH_ENABLED: "true",
     AGENTGATE_DATABASE_URL: `sqlite:///${project.database}`,
     AGENTGATE_AUTH_BOOTSTRAP_TOKEN_FILE: project.bootstrapToken,
     AGENTGATE_WORKER_READY_FILE: project.workerReady,

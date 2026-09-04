@@ -5,6 +5,7 @@ import { api } from "../api/client";
 import { TargetsPage } from "./TargetsPage";
 
 vi.mock("../api/client", () => ({
+  localMonitorEndpoint: vi.fn(() => "http://127.0.0.1:8000/health"),
   api: {
     listMonitorTargets: vi.fn(),
     createMonitorTarget: vi.fn(),
@@ -58,5 +59,31 @@ describe("TargetsPage", () => {
     expect(screen.getByText("未知")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "立即探测" }));
     await waitFor(() => expect(api.probeMonitorTarget).toHaveBeenCalledWith("target-1"));
+    expect(await screen.findByRole("status")).toHaveClass("inline-success");
+  });
+
+  it("announces a failed probe as an alert instead of a success status", async () => {
+    vi.mocked(api.probeMonitorTarget).mockRejectedValueOnce(new Error("探测失败"));
+    render(
+      <MemoryRouter>
+        <TargetsPage />
+      </MemoryRouter>,
+    );
+
+    await screen.findByRole("heading", { name: "监控" });
+    fireEvent.click(await screen.findByRole("button", { name: "立即探测" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("探测失败");
+  });
+
+  it("shows the API error when loading monitoring targets fails", async () => {
+    vi.mocked(api.listMonitorTargets).mockRejectedValueOnce(new Error("无法连接本地 API，请确认服务已经启动。"));
+    render(
+      <MemoryRouter>
+        <TargetsPage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("无法连接本地 API，请确认服务已经启动。");
   });
 });

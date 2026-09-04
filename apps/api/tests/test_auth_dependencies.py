@@ -5,6 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session
 
+from app.config import get_settings
 from app.db import create_db_and_tables, create_db_engine, get_session, seed_demo_state
 from app.main import app
 
@@ -29,6 +30,29 @@ def test_existing_browser_route_rejects_an_unauthenticated_request() -> None:
 
     assert response.status_code == 401
     assert response.json()["error"]["code"] == "authentication_required"
+
+
+def test_disabled_mode_allows_browser_reads_without_an_operator(
+    auth_client: tuple[TestClient, object, object], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, _, _ = auth_client
+    monkeypatch.setattr(get_settings(), "auth_enabled", False)
+
+    response = client.get("/api/runs")
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_disabled_mode_allows_browser_writes_without_a_session(
+    auth_client: tuple[TestClient, object, object], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, _, _ = auth_client
+    monkeypatch.setattr(get_settings(), "auth_enabled", False)
+
+    response = client.post("/api/runs", json={"user_request": "inspect service health"})
+
+    assert response.status_code == 202
 
 
 @pytest.mark.parametrize(

@@ -11,15 +11,19 @@ from sqlmodel import Session, select
 
 from app.auth.models import BootstrapToken, ClientToken, Operator
 from app.auth.security import verify_password
+from app.config import get_settings
 from app.db import create_db_and_tables, create_db_engine, get_session
 from app.main import app
 from app.models import utc_now
 
 
-def test_auth_status_reports_first_run_as_unauthenticated() -> None:
+def test_auth_status_reports_first_run_as_unauthenticated(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Removing the status boundary must make first-run clients unable to discover setup state."""
     engine = create_db_engine("sqlite://")
     create_db_and_tables(engine)
+    monkeypatch.setattr(get_settings(), "auth_enabled", True)
 
     def override_session() -> Generator[Session, None, None]:
         with Session(engine) as session:
@@ -34,6 +38,30 @@ def test_auth_status_reports_first_run_as_unauthenticated() -> None:
 
     assert response.status_code == 200
     assert response.json() == {"authenticated": False, "setup_required": True}
+
+
+def test_auth_status_reports_disabled_mode_as_authenticated(
+    auth_client: tuple[TestClient, object, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, _, _ = auth_client
+    monkeypatch.setattr(get_settings(), "auth_enabled", False)
+
+    response = client.get("/api/auth/status")
+
+    assert response.status_code == 200
+    assert response.json() == {"authenticated": True, "setup_required": False}
+
+
+def test_disabled_mode_returns_csrf_placeholder_without_a_session(
+    auth_client: tuple[TestClient, object, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, _, _ = auth_client
+    monkeypatch.setattr(get_settings(), "auth_enabled", False)
+
+    response = client.get("/api/auth/csrf")
+
+    assert response.status_code == 200
+    assert response.json() == {"csrf_token": "local-auth-disabled"}
 
 
 def _setup(client: TestClient, token_file: Path) -> None:

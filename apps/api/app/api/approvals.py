@@ -1,13 +1,14 @@
-from typing import Annotated
+from typing import Annotated, Any, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app.api.runs import to_action_response
 from app.auth.dependencies import require_csrf
 from app.auth.models import Operator
 from app.db import get_session
+from app.models import ActionStatus, ToolAction
 from app.schemas import ApprovalRequest, ToolActionResponse
 from app.services.approvals import (
     ApprovalConflictError,
@@ -18,6 +19,17 @@ from app.services.approvals import (
 router = APIRouter(prefix="/api/approvals", tags=["approvals"])
 SessionDep = Annotated[Session, Depends(get_session)]
 OperatorDep = Annotated[Operator, Depends(require_csrf)]
+
+
+@router.get("", response_model=list[ToolActionResponse])
+def list_approvals(session: SessionDep, _: OperatorDep) -> list[ToolActionResponse]:
+    actions = session.exec(
+        select(ToolAction)
+        .where(ToolAction.status == ActionStatus.PENDING_APPROVAL)
+        .order_by(cast(Any, ToolAction.created_at).desc())
+        .limit(100)
+    ).all()
+    return [to_action_response(action) for action in actions]
 
 
 def _decide(

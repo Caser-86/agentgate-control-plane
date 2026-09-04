@@ -18,7 +18,8 @@ agentgate-control-plane/
 │  │  ├─ reports/ 验收和任务报告
 │  │  └─ progress.md 当前进度摘要
 │  ├─ architecture.md 系统架构、状态机和本地安全边界
-│  ├─ demo.md        3–5 分钟本地演示流程
+│  ├─ demo.md        一键准备和五分钟真实文件演示流程
+│  ├─ file-action-governance.md 文件动作、审批、隔离和恢复边界
 │  └─ README.md      本文件
 ├─ scripts/          Windows 本地启动、迁移、Worker 和验收脚本
 ├─ compose.yaml      本地服务编排
@@ -33,7 +34,8 @@ agentgate-control-plane/
 | --- | --- | --- |
 | [README.md](../README.md) | 使用者、部署者 | 项目用途、启动、登录、演示、模型配置和测试 |
 | [architecture.md](architecture.md) | 开发者、评审者 | 组件关系、状态机、审批顺序、事务和幂等边界 |
-| [demo.md](demo.md) | 演示者、验收者 | 使用 mock 完成一次审批、拒绝和审计演示 |
+| [demo.md](demo.md) | 演示者、验收者 | 一键准备 Native Worker，完成真实文件审批、隔离、恢复和审计演示 |
+| [file-action-governance.md](file-action-governance.md) | 开发者、面试评审者 | 文件路径、保护规则、幂等、恢复和系统边界 |
 | `superpowers/specs/` | 产品和架构设计者 | 需求规格与设计决策 |
 | `superpowers/plans/` | 开发者 | 分阶段实施计划和文件清单 |
 | `superpowers/reports/` | 开发者、评审者 | 任务完成报告、测试证据和限制 |
@@ -45,22 +47,28 @@ agentgate-control-plane/
 | --- | --- |
 | 第一次启动 | [`README.md`](../README.md) 的“启动本地项目”和 `scripts/setup-local.ps1` |
 | 启动/停止服务 | `scripts/start-local.ps1`、`scripts/stop-local.ps1` |
+| 一键准备真实文件演示 | `scripts/demo.ps1` |
 | 手动执行数据库迁移 | `scripts/migrate-local.ps1` |
 | 检查本地基础设施 | `scripts/verify-foundation.ps1` |
-| 启动原生 Worker | `scripts/start-worker.ps1` |
+| 首次注册原生 Worker | `scripts/start-worker.ps1`（一次性令牌只用于首次注册） |
+| 持续运行原生 Worker | `scripts/start-worker.ps1 -Continuous` |
+| 安装登录自启动 | `scripts/install-worker.ps1` |
+| 移除登录自启动 | `scripts/uninstall-worker.ps1`（保留 Worker 状态） |
+| 长时间稳定性测试 | `scripts/soak-worker.ps1`（只读健康检查与已登记目标） |
 | 查看行为和审批流程 | [`demo.md`](demo.md) |
 | 理解系统边界 | [`architecture.md`](architecture.md) |
 | 运行 API 单元测试 | `apps/api/tests/` |
 | 运行 Web 单元测试 | `apps/web/src/**/*.test.*` |
 | 运行 Web E2E | `apps/web/e2e/` |
+| 文件动作 Windows 合约 | `scripts/file-action.contract.test.ps1` |
 
 ## 当前版本边界
 
-Phase 0 的业务工具仍使用本地演示状态表：`get_service_health` 和 `search_logs` 只读取数据库，`restart_service` 只修改数据库中的演示状态，`rotate_api_key` 没有执行处理器。Phase 1 新增的原生 Worker 监控能力只支持回环 HTTP、固定 `sc.exe query` 和结构化结果，不执行任意命令、文件操作、服务写入或远程检查。
+Phase 0 的业务工具仍使用本地演示状态表：`get_service_health` 和 `search_logs` 只读取数据库，`restart_service` 只修改数据库中的演示状态，`rotate_api_key` 没有执行处理器。Phase 1 现在还包含受管工作区文件动作：Native Worker 只允许 `inspect`、`quarantine` 和 `restore`，并在 API 策略、审批、同卷隔离和审计边界内执行。监控仍只支持回环 HTTP、固定 `sc.exe query` 和结构化结果，不执行任意命令、服务写入或远程检查。持续模式只会处理已登记目标，不会自主扫描本机。
 
 监控功能的入口是中文 Web 页“监控”，对应 API 路径为 `/api/monitor/targets` 和 `/api/monitor/events`。目标登记、探测排队和查询都要求管理员会话；目标地址和 Windows 服务名在 API 与 Worker 两侧重复校验。
 
-外部 Agent 可以使用 `/api/v1/events`、`/api/v1/checks` 和 `/api/v1/actions`，但当前 `/api/v1/actions` 主要是策略预检接口，返回决定不等于已经进入执行队列。扩展真实执行能力时，必须同步修改工具登记、策略、Worker capability、迁移、测试和架构文档。
+外部 Agent 可以使用 `/api/v1/events`、`/api/v1/checks` 和 `/api/v1/actions`。文件动作会真实进入统一审批和 Worker 队列；其他业务工具仍可能只返回策略预检决定。扩展动作时，必须同步修改工具登记、策略、Worker capability、迁移、测试和架构文档。
 
 ## 本地生成内容
 

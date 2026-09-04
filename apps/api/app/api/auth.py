@@ -42,7 +42,7 @@ ALLOWED_CLIENT_SCOPES = frozenset(
 def _error(status_code: int, code: str) -> HTTPException:
     return HTTPException(
         status_code=status_code,
-        detail={"code": code, "message": "Request denied"},
+        detail={"code": code, "message": "请求被拒绝"},
     )
 
 
@@ -61,6 +61,8 @@ def _set_session_cookie(response: Response, token: str) -> None:
 
 @router.get("/status", response_model=AuthStatusResponse)
 def status(request: Request, session: SessionDep) -> AuthStatusResponse:
+    if not get_settings().auth_enabled:
+        return AuthStatusResponse(authenticated=True, setup_required=False)
     setup_required = session.exec(select(Operator)).first() is None
     try:
         require_operator(request, session)
@@ -121,6 +123,8 @@ def logout(
 
 @router.get("/csrf", response_model=CsrfResponse)
 def csrf(request: Request, _: OperatorDep, session: SessionDep) -> CsrfResponse:
+    if not get_settings().auth_enabled:
+        return CsrfResponse(csrf_token="local-auth-disabled")
     raw_token = request.cookies.get(SESSION_COOKIE)
     if not raw_token:
         raise _error(401, "authentication_required")

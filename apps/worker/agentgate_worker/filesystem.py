@@ -107,11 +107,16 @@ class FileConnector:
                 raise FileActionError("path_escape", "目标路径越过工作区边界")
         except ValueError as error:
             raise FileActionError("path_escape", "目标路径使用了不同卷") from error
+        # Windows AppContainer/compatibility layers can map a logical workspace
+        # path to another physical path. Resolve the root through a directory
+        # handle as well, then compare two final paths without weakening the
+        # logical path and reparse-point checks above.
+        final_root_path = _final_handle_path(root)
         final_path = _final_handle_path(candidate)
         try:
             if ntpath.commonpath(
-                [ntpath.normcase(final_path), ntpath.normcase(str(root))]
-            ) != ntpath.normcase(str(root)):
+                [ntpath.normcase(final_path), ntpath.normcase(final_root_path)]
+            ) != ntpath.normcase(final_root_path):
                 raise FileActionError("path_escape", "最终文件句柄越过工作区边界")
         except ValueError as error:
             raise FileActionError("path_escape", "最终文件使用了不同卷") from error

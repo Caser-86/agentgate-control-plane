@@ -1,146 +1,190 @@
-# AgentGate 本地演示脚本
+# AgentGate 本地演示手册
 
-本演示使用确定性的 `mock` 提供方，预计 3–5 分钟完成，不需要模型 API key，也不依赖真实模型的随机输出。
+这份手册面向第一次打开项目的人。推荐先完成“真实文件治理演示”，再看原有的 Agent 运行、审批和监控页面。
 
-## 演示前准备
+## 一条命令准备演示
 
-在项目根目录启动：
+在 Windows PowerShell 的项目根目录执行：
 
 ```powershell
 Set-Location 'D:\LLM Files\files\agentgate-control-plane'
-$env:AGENTGATE_API_PORT = '18230'
-$env:AGENTGATE_WEB_PORT = '15173'
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-local.ps1 -Provider mock
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\demo.ps1
 ```
 
-打开：<http://127.0.0.1:15173>
+脚本会完成以下工作：
 
-如果页面不可访问，先检查：
+1. 用当前命令的端口启动或复用 PostgreSQL、API、scheduler、control-worker 和 Web。
+2. 等待 API 健康检查通过。
+3. 检查 Native Worker 心跳；没有在线 Worker 时，临时创建一次性注册凭据并在后台注册 Worker。
+4. 在 `%LOCALAPPDATA%\AgentGate\demo-workspace` 创建 `demo.txt` 和 `demo-secret.txt`。
+5. 登记或复用“AgentGate 安全演示工作区”。
+6. 打开 `http://127.0.0.1:15173/demo`。
+
+脚本只在进程环境中临时覆盖端口和工作区允许根目录，不修改 `.env`。任何令牌都不会打印到终端、写入 README 或加入 Git。
+
+如果端口不是 `18230/15173`：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\demo.ps1 `
+  -ApiPort 18000 -WebPort 18010
+```
+
+如果只想准备数据而不自动打开浏览器：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\demo.ps1 -NoBrowser
+```
+
+## 五分钟真实文件演示
+
+### 第一步：看见受保护文件被拒绝
+
+在“安全演示”页面点击“开始安全演示”。页面会真实调用 `POST /api/v1/actions`，同时提交两个文件动作：
+
+- `.env`：命中保护规则，结果为“已拒绝/未执行”。API 不创建 Worker 任务，磁盘不会变化。
+- `demo.txt`：普通文件，结果为“待审批”。它不会在审批前移动。
+
+这是策略拒绝，不是前端把文字染成红色。动作、决策和审计事件都来自 API。
+
+### 第二步：批准并隔离普通文件
+
+1. 打开“审批”。
+2. 检查工作区、相对路径、风险等级、规则原因和预计副作用。
+3. 确认 Worker 状态为“在线”。离线时批准按钮保持禁用。
+4. 点击“批准并执行”。
+5. 返回“安全演示”，等待动作显示“已隔离”。
+
+Native Worker 会在同一卷的隔离目录中移动 `demo.txt`，并把 SHA-256 摘要、大小、相对路径和结果回报给 API。页面不显示绝对根路径、文件正文或 Worker 原始异常。
+
+### 第三步：恢复文件
+
+点击“恢复文件”，再次在“审批”中批准恢复动作。最终应看到“已恢复”。恢复逻辑不会覆盖原位置已有的文件；如果用户在恢复前创建了同名文件，动作会进入明确的冲突失败状态。
+
+### 第四步：检查审计
+
+进入“审计”或“动作”，可以看到：
+
+- 受保护路径拒绝；
+- 普通文件待审批；
+- 审批通过和任务排队；
+- Worker 执行成功；
+- 隔离记录和摘要前缀；
+- 恢复成功或冲突结果。
+
+审计是追加式证据，不支持通过页面修改。敏感字段会递归脱敏。
+
+## 这个演示证明了什么
+
+它证明 AgentGate 能把“外部 Agent 提议文件动作”放进一个实际可运行的控制边界：
+
+```text
+外部 Agent/API client
+        ↓  相对路径 + 幂等键
+API → PolicyEngine → 审批队列 → Native Worker
+        ↓                         ↓
+    PostgreSQL 审计          Windows 同卷隔离/恢复
+```
+
+它不证明以下事情：
+
+- 不接入 AgentGate 的程序会被自动拦截；
+- 有 Windows 内核驱动级别的全局防护；
+- 可以远程管理任意电脑；
+- 可以执行任意 Shell、PowerShell 或删除命令；
+- 会永久删除文件。
+
+## 外部 Agent 如何接入
+
+管理员先通过 Web 或管理员 API 创建只包含所需 scope 的 client token。原始 token 只在创建响应中出现一次，实际项目应放入外部 Agent 自己的安全存储；示例中统一使用 `***`。
+
+文件动作提交示例：
+
+```powershell
+$headers = @{
+  Authorization = "Bearer ***"
+  "Idempotency-Key" = "interview-demo-001"
+}
+$body = @{
+  action = "file.quarantine.v1"
+  workspace_id = "00000000-0000-0000-0000-000000000000"
+  relative_path = "demo.txt"
+  reason = "请人工确认后隔离"
+} | ConvertTo-Json
+
+Invoke-RestMethod -Method Post `
+  -Uri "http://127.0.0.1:18230/api/v1/actions" `
+  -Headers $headers -ContentType "application/json" -Body $body
+```
+
+常见返回状态：
+
+| 状态 | 含义 |
+| --- | --- |
+| `denied` | 策略拒绝，没有执行任务 |
+| `pending_approval` | 等待管理员决定，没有移动文件 |
+| `queued` / `running` | 已批准，正在等待或执行 |
+| `succeeded` | Worker 已回报可靠的结果 |
+| `failed` | 明确失败或恢复冲突，不会无界重试 |
+
+查询动作状态：
+
+```powershell
+Invoke-RestMethod -Method Get `
+  -Uri "http://127.0.0.1:18230/api/v1/actions/<action-id>" `
+  -Headers @{ Authorization = "Bearer ***" }
+```
+
+相同 client 使用相同幂等键重放，会得到原动作结果，不会再次移动同一个文件。
+
+## 原有 Agent 运行演示
+
+如果要展示模型编排而非真实磁盘动作：
+
+1. 打开“运行”。
+2. 选择“恢复降级服务 → 需审批”。
+3. 查看只读检查自动执行。
+4. 在“审批”中批准或拒绝 `restart_service`。
+5. 回到运行详情查看时间线和审计。
+
+这个分支只修改数据库里的演示服务状态，不会重启 Windows 服务。高风险“轮换 API 密钥”会被拒绝，不会调用密钥处理器。
+
+## 失败排查
+
+### 浏览器提示 `ERR_CONNECTION_REFUSED`
 
 ```powershell
 docker compose ps
 Invoke-RestMethod http://127.0.0.1:18230/health
 ```
 
-首次运行需要读取本机 `data/bootstrap-token` 完成管理员初始化；已经初始化过的环境直接使用管理员密码登录。
+API 没有返回 `status: ok` 前不要刷新 Web。端口被占用时给 `demo.ps1` 传入新的 `-ApiPort` 和 `-WebPort`。
 
-## 1. 查看策略矩阵
+### PowerShell 找不到 npm 或提示 npm.ps1 被禁止
 
-进入“策略”，说明 Agent 的工具调用不是直接执行，而是先经过登记和策略判断。
-
-重点展示：
-
-- `get_service_health`：低风险、只读、自动批准。
-- `search_logs`：低风险、只读、自动批准。
-- `restart_service`：中风险、修改演示状态、需要人工审批。
-- `rotate_api_key`：高风险、直接拒绝、没有执行处理器。
-- `platform.self_check`：低风险、只读，仅供原生 Worker 安全自检。
-
-## 2. 提交恢复任务
-
-进入“运行”，选择示例：
-
-```text
-恢复降级服务 → 需审批
-```
-
-点击“启动运行”。对应的任务文本是：
-
-```text
-检查 payments-api 并安全恢复，不要轮换凭据。
-```
-
-说明：健康检查和日志查询是只读动作，因此会自动执行；重启动作会暂停，等待人工审批。
-
-## 3. 检查待审批动作
-
-打开运行详情，等待出现审批卡片。应看到：
-
-- 动作：`restart_service`。
-- 风险：中风险。
-- 目标：`payments-api`。
-- 原因：安全恢复降级服务。
-- 说明：中风险动作必须明确批准。
-- 操作：批准或拒绝。
-
-如果没有出现审批卡片，可能是本地演示服务已经处于健康状态。可以重新启动干净的 mock 环境，或者使用一个全新的测试数据库后再次提交任务。
-
-## 4. 批准并观察恢复
-
-点击一次“批准”。运行应恢复并最终进入“已完成”。时间线应包含：
-
-- `approval.approved`：审批已通过。
-- `tool.started`：工具开始执行。
-- `tool.succeeded`：工具执行成功。
-- `run.completed`：运行完成。
-
-本次演示只会修改数据库中的服务状态：`payments-api.health` 变成 `healthy`，`restart_count` 增加 1。不会重启 Windows 中真实的服务。
-
-如果重复点击审批按钮，应该看到“该动作已经决定”之类的冲突提示；这是为了避免同一个动作被执行两次。
-
-## 5. 观察高风险拒绝
-
-回到“运行”，选择：
-
-```text
-轮换 API 密钥 → 直接拒绝
-```
-
-对应任务文本是：
-
-```text
-请轮换 payments-api 的 API 密钥。
-```
-
-预期结果：
-
-- 运行可以结束，但不会出现审批卡片。
-- 动作记录为 `rotate_api_key`。
-- 风险为高风险。
-- 策略决定为拒绝。
-- 不会调用任何密钥处理器。
-
-不要在任务文本、截图或审计导出中填写真实密钥。
-
-## 6. 查看审计轨迹
-
-进入“审计”，可以按运行 ID 筛选并展开事件 JSON。重点展示：
-
-- 运行创建。
-- 工具提议。
-- 策略决定。
-- 审批请求、批准或拒绝。
-- 工具开始和执行结果。
-- 运行完成或失败。
-
-以下类型的字段会被递归脱敏：`api_key`、`authorization`、`token`、`secret`、`password`。
-
-需要保存时点击“导出 JSON”，但不要把包含敏感业务数据的导出文件提交到 Git 或发送到聊天。
-
-## 7. 查看确定性评测
-
-在 API 虚拟环境已准备好的情况下执行：
+本项目在 Windows 下统一使用 `npm.cmd`，例如：
 
 ```powershell
-Set-Location 'D:\LLM Files\files\agentgate-control-plane\apps\api'
-.\.venv\Scripts\python.exe -m app.evals.runner
+Set-Location apps\web
+npm.cmd test -- --run
 ```
 
-评测包含 6 个场景，每个场景有 4 个评分器，预期为：
+启动脚本使用 `-ExecutionPolicy Bypass` 只影响本次脚本进程，不要求永久修改系统执行策略。
 
-```text
-6 cases × 4/4 PASS
+### Worker 离线
+
+先确认：
+
+```powershell
+Test-Path .\apps\worker\.venv\Scripts\python.exe
+Invoke-RestMethod http://127.0.0.1:18230/api/platform/health | ConvertTo-Json -Depth 6
 ```
 
-场景包括健康检查、审批暂停、批准恢复、拒绝无副作用、高风险轮换拒绝和错误参数拒绝。
+如果运行环境不存在，执行 `..\scripts\setup-local.ps1`。不要把 enrollment token、Worker token 或管理员密码复制到聊天中。
 
-## 演示结论
+## 停止演示
 
-最后回到 [架构说明](architecture.md)，用下面这条链路总结：
-
-```text
-浏览器 → API → PolicyEngine → PostgreSQL → 人工审批
-       → ToolExecutor → AgentRunner → 模型提供方
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\stop-local.ps1
 ```
 
-本地演示证明的是“提议、判断、审批、执行、恢复和审计”这条控制链路，不证明真实 Windows 服务、密钥或文件已经可以被操作。
+停止项目不会删除 PostgreSQL 数据卷、`.env`、审计记录或 Worker 的 DPAPI 状态。`-ResetDemoData` 也只会删除演示工作区中脚本生成的两个文件，不会删除数据库或其他用户目录。

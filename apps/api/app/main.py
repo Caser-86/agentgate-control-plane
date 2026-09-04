@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlmodel import Session
 
+from app.api.actions import router as actions_router
 from app.api.approvals import router as approvals_router
 from app.api.audit import router as audit_router
 from app.api.auth import router as auth_router
@@ -72,6 +73,7 @@ app.include_router(auth_router)
 app.include_router(events_router)
 app.include_router(runs_router)
 app.include_router(approvals_router)
+app.include_router(actions_router)
 app.include_router(audit_router)
 app.include_router(policies_router)
 app.include_router(monitoring_router)
