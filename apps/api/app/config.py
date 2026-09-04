@@ -1,6 +1,7 @@
 from functools import lru_cache
+from typing import Self
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -26,6 +27,7 @@ class Settings(BaseSettings):
     auth_bootstrap_ttl_seconds: int = 900
     auth_session_ttl_seconds: int = 28800
     auth_cookie_secure: bool = False
+    auth_enabled: bool = True
     api_port: int = Field(default=8000, ge=1, le=65535)
     web_port: int = Field(default=5173, ge=1, le=65535)
     environment: str = Field(default="production", validation_alias="AGENTGATE_ENV")
@@ -33,6 +35,18 @@ class Settings(BaseSettings):
     max_steps: int = 8
     tool_timeout_seconds: int = 10
     run_timeout_seconds: int = 120
+    workspace_allowed_root: str = Field(
+        default=r"C:\AgentGate\workspaces",
+        validation_alias="AGENTGATE_WORKSPACE_ALLOWED_ROOT",
+    )
+
+    @model_validator(mode="after")
+    def validate_auth_boundary(self) -> Self:
+        if not self.auth_enabled and self.environment != "development":
+            raise ValueError(
+                "AGENTGATE_AUTH_ENABLED=false 仅允许在 AGENTGATE_ENV=development 时使用"
+            )
+        return self
 
     @property
     def api_base_url(self) -> str:

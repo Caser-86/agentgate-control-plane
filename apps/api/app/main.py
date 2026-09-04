@@ -18,6 +18,7 @@ from app.api.policies import router as policies_router
 from app.api.runs import router as runs_router
 from app.api.v1 import router as v1_router
 from app.api.worker import router as worker_router
+from app.api.workspaces import router as workspaces_router
 from app.auth.security import ensure_bootstrap_token
 from app.config import get_settings
 from app.db import (
@@ -52,7 +53,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     if settings.environment == "development" and settings.seed_demo:
         with Session(engine) as session:
             seed_demo_state(session)
-    if not is_sqlite_test_engine or settings.environment == "test":
+    if settings.auth_enabled and (not is_sqlite_test_engine or settings.environment == "test"):
         with Session(engine) as session:
             ensure_bootstrap_token(session, settings)
     yield
@@ -77,6 +78,7 @@ app.include_router(monitoring_router)
 app.include_router(platform_router)
 app.include_router(v1_router)
 app.include_router(worker_router)
+app.include_router(workspaces_router)
 
 
 @app.exception_handler(HTTPException)
@@ -97,7 +99,7 @@ async def validation_error(_: Request, __: RequestValidationError) -> JSONRespon
         content={
             "error": {
                 "code": "validation_error",
-                "message": "Request validation failed",
+                "message": "请求参数不合法",
             }
         },
     )
