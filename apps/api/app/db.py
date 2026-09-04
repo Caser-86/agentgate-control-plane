@@ -12,6 +12,7 @@ from sqlmodel import Session, SQLModel, create_engine
 
 import app.auth.models  # noqa: F401
 import app.control.models  # noqa: F401
+import app.files.models  # noqa: F401
 import app.monitoring.models  # noqa: F401
 from app.config import get_settings
 from app.models import ServiceState

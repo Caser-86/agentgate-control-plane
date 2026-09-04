@@ -5,10 +5,10 @@ from logging.config import fileConfig
 from alembic import context
 from sqlmodel import SQLModel
 
-# Import every SQLModel module before accessing metadata. Task 2 extends this list.
-import app.models  # noqa: F401
-import app.control.models  # noqa: F401
 import app.auth.models  # noqa: F401
+import app.control.models  # noqa: F401
+import app.files.models  # noqa: F401
+import app.models  # noqa: F401
 import app.monitoring.models  # noqa: F401
 
 config = context.config

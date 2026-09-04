@@ -81,6 +81,8 @@ def test_migration_head_creates_legacy_tables(postgres_url: str) -> None:
         assert inspector.has_table("tool_actions")
         assert inspector.has_table("audit_events")
         assert inspector.has_table("service_states")
+        assert inspector.has_table("managed_workspaces")
+        assert inspector.has_table("quarantine_entries")
         with engine.connect() as connection:
             revision = MigrationContext.configure(connection).get_current_revision()
         script = ScriptDirectory.from_config(

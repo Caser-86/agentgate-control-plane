@@ -67,9 +67,17 @@ class ToolAction(SQLModel, table=True):
     __tablename__ = "tool_actions"
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
-    run_id: UUID = Field(foreign_key="agent_runs.id", index=True)
+    run_id: UUID | None = Field(default=None, foreign_key="agent_runs.id", index=True)
+    proposer_client_id: UUID | None = Field(
+        default=None, foreign_key="client_tokens.id", index=True
+    )
     tool_call_id: str
     tool_name: str
+    target_type: str | None = None
+    target_id: UUID | None = Field(default=None, index=True)
+    action_version: str | None = None
+    arguments_digest: str | None = None
+    policy_version: str | None = None
     risk_level: RiskLevel
     policy_decision: PolicyDecision
     status: ActionStatus = Field(default=ActionStatus.PROPOSED, index=True)
@@ -80,6 +88,7 @@ class ToolAction(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utc_now, index=True)
     decided_at: datetime | None = None
     executed_at: datetime | None = None
+    approval_expires_at: datetime | None = Field(default=None, index=True)
 
 
 class AuditEvent(SQLModel, table=True):
