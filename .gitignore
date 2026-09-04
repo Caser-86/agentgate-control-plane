@@ -3,6 +3,7 @@
 node_modules/
 dist/
 data/*.db
+data/*.log
 apps/api/data/*.db
 .pytest_cache/
 .mypy_cache/
@@ -15,5 +16,7 @@ __pycache__/
 eval-results.json
 .agentgate/
 apps/worker/.agentgate-worker/
+apps/worker/.demo-worker/
+.playwright-cli/
 .worktrees/
 .superpowers/
