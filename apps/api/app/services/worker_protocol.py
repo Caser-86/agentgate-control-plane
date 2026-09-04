@@ -15,6 +15,7 @@ from app.auth.security import digest_secret, new_secret
 from app.control.enums import TaskKind, TaskOutcome, TaskStatus, WorkerStatus
 from app.control.models import ControlTask, WorkerExecutionGrant, WorkerRegistration
 from app.control.repositories import append_outbox_event, claim_next_task, complete_task
+from app.files.security import InvalidRelativePath, normalize_relative_path
 from app.models import utc_now
 from app.monitoring.enums import (
     HTTP_MONITOR_CAPABILITY,
@@ -183,8 +184,6 @@ def sanitize_file_result(result: dict[str, object]) -> dict[str, object]:
         raise WorkerProtocolError(422, "invalid_result")
     result_kind = result.get("result_kind")
     side_effect = result.get("side_effect")
-    digest = result.get("content_sha256")
-    size_bytes = result.get("size_bytes")
     if not isinstance(result_kind, str) or result_kind not in {
         "file_metadata", "file_quarantine", "file_restore"
     }:
@@ -193,21 +192,43 @@ def sanitize_file_result(result: dict[str, object]) -> dict[str, object]:
         "none", "quarantined", "restored", "conflict"
     }:
         raise WorkerProtocolError(422, "invalid_result")
-    if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
-        raise WorkerProtocolError(422, "invalid_result")
-    if not isinstance(size_bytes, int) or isinstance(size_bytes, bool) or size_bytes < 0:
-        raise WorkerProtocolError(422, "invalid_result")
     safe: dict[str, object] = {
         "status": status,
         "result_kind": result_kind,
         "side_effect": side_effect,
-        "content_sha256": digest,
-        "size_bytes": size_bytes,
     }
+    digest = result.get("content_sha256")
+    if digest is not None:
+        if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise WorkerProtocolError(422, "invalid_result")
+        safe["content_sha256"] = digest
+    elif status == "succeeded":
+        raise WorkerProtocolError(422, "invalid_result")
+    size_bytes = result.get("size_bytes")
+    if size_bytes is not None:
+        if not isinstance(size_bytes, int) or isinstance(size_bytes, bool) or size_bytes < 0:
+            raise WorkerProtocolError(422, "invalid_result")
+        safe["size_bytes"] = size_bytes
+    elif status == "succeeded":
+        raise WorkerProtocolError(422, "invalid_result")
     for key in ("error_code", "error_message"):
         value = result.get(key)
         if isinstance(value, str):
             safe[key] = value[:256]
+    entry_id = result.get("quarantine_entry_id")
+    if entry_id is not None:
+        try:
+            safe["quarantine_entry_id"] = str(UUID(str(entry_id)))
+        except (TypeError, ValueError) as error:
+            raise WorkerProtocolError(422, "invalid_result") from error
+    quarantine_relative_path = result.get("quarantine_relative_path")
+    if quarantine_relative_path is not None:
+        if not isinstance(quarantine_relative_path, str):
+            raise WorkerProtocolError(422, "invalid_result")
+        try:
+            safe["quarantine_relative_path"] = normalize_relative_path(quarantine_relative_path)
+        except InvalidRelativePath as error:
+            raise WorkerProtocolError(422, "invalid_result") from error
     if len(_canonical_json(safe)) > MAX_RESULT_BYTES:
         raise WorkerProtocolError(422, "result_too_large")
     return safe

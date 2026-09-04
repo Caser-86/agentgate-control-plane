@@ -23,6 +23,8 @@ class WorkerRuntimeClient(Protocol):
 
     def probe_result(self, grant: TaskGrant) -> dict[str, object]: ...
 
+    def file_result(self, grant: TaskGrant) -> dict[str, object]: ...
+
     def complete(self, grant: TaskGrant, result: dict[str, object]) -> None: ...
 
 
@@ -80,7 +82,11 @@ def _process_worker_tasks(client: WorkerRuntimeClient) -> None:
     grant = client.claim()
     if grant is not None:
         client.start(grant)
-        client.complete(grant, client.probe_result(grant))
+        if grant.capability.startswith("file."):
+            result = client.file_result(grant)
+        else:
+            result = client.probe_result(grant)
+        client.complete(grant, result)
 
 
 def run_worker_cycle(client: WorkerRuntimeClient) -> None:

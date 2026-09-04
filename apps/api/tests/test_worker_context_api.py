@@ -63,6 +63,7 @@ def test_worker_context_requires_active_grant_and_matching_version(
             kind=TaskKind.CONTROL,
             capability="file.inspect.v1",
             payload={
+                "action_id": str(uuid4()),
                 "workspace_id": str(workspace.id),
                 "workspace_version": 1,
                 "relative_path": "notes.txt",

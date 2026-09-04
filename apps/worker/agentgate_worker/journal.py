@@ -8,7 +8,22 @@ from pathlib import Path
 MAX_JOURNAL_RESULT_BYTES = 4096
 REDACTED = "***REDACTED***"
 ALLOWED_RESULT_KEYS = frozenset(
-    {"status", "worker_version", "protocol_version", "capabilities", "detail", "latency_ms"}
+    {
+        "status",
+        "worker_version",
+        "protocol_version",
+        "capabilities",
+        "detail",
+        "latency_ms",
+        "result_kind",
+        "side_effect",
+        "content_sha256",
+        "size_bytes",
+        "error_code",
+        "error_message",
+        "quarantine_entry_id",
+        "quarantine_relative_path",
+    }
 )
 SENSITIVE_KEY_PARTS = frozenset(
     {"apikey", "authorization", "clientsecret", "password", "passwordhash", "secret", "token"}
@@ -54,6 +69,22 @@ def _bounded_result(result: dict[str, object], max_result_bytes: int) -> dict[st
         and (
             key != "latency_ms"
             or isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 60_000
+        )
+        and (
+            key not in {"size_bytes"}
+            or isinstance(value, int) and not isinstance(value, bool) and value >= 0
+        )
+        and (
+            key not in {"content_sha256"}
+            or isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value) is not None
+        )
+        and (
+            key not in {"quarantine_entry_id", "quarantine_relative_path"}
+            or isinstance(value, str)
+        )
+        and (
+            key not in {"result_kind", "side_effect", "error_code", "error_message"}
+            or isinstance(value, str)
         )
     }
     if "status" not in bounded:

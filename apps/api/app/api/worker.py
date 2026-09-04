@@ -9,6 +9,7 @@ from app.config import get_settings
 from app.control.enums import TaskStatus
 from app.control.models import ControlTask, WorkerExecutionGrant
 from app.db import get_session
+from app.files.models import QuarantineEntry
 from app.services.worker_protocol import (
     MAX_RESULT_BYTES,
     ClaimRequest,
@@ -206,4 +207,63 @@ def worker_workspace_context(
         "root_path": context.root_path,
         "quarantine_root_path": context.quarantine_root_path,
         "protected_patterns": list(context.protected_patterns),
+    }
+
+
+@router.get("/quarantine-entries/{entry_id}")
+def worker_quarantine_entry(
+    entry_id: UUID,
+    worker: WorkerDep,
+    session: SessionDep,
+    version: Annotated[int, Query(gt=0)],
+    task_id: Annotated[UUID, Query()],
+) -> dict[str, object]:
+    task = session.get(ControlTask, task_id)
+    worker_id = UUID(worker.worker_id)
+    grant = session.get(WorkerExecutionGrant, task_id)
+    entry = session.get(QuarantineEntry, entry_id)
+    if (
+        task is None
+        or task.capability != "file.restore.v1"
+        or task.capability not in worker.capabilities
+        or task.lease_owner_id != worker_id
+        or task.status not in {TaskStatus.LEASED, TaskStatus.RUNNING}
+        or grant is None
+        or grant.worker_id != worker_id
+        or entry is None
+    ):
+        raise HTTPException(
+            403,
+            detail={"code": "worker_context_not_authorized", "message": "Worker 上下文授权无效"},
+        )
+    if (
+        task.payload.get("quarantine_entry_id") != str(entry.id)
+        or task.payload.get("workspace_id") != str(entry.workspace_id)
+    ):
+        raise HTTPException(
+            403,
+            detail={"code": "worker_context_not_authorized", "message": "Worker 上下文授权无效"},
+        )
+    if task.payload.get("workspace_version") != version:
+        raise HTTPException(
+            409,
+            detail={"code": "workspace_version_conflict", "message": "工作区版本已变化"},
+        )
+    try:
+        WorkspaceService(session).get_context(entry.workspace_id, version)
+    except WorkspaceError as error:
+        raise HTTPException(
+            error.status_code,
+            detail={"code": error.code, "message": error.message},
+        ) from error
+    return {
+        "id": str(entry.id),
+        "action_id": str(entry.action_id),
+        "workspace_id": str(entry.workspace_id),
+        "workspace_version": version,
+        "original_relative_path": entry.original_relative_path,
+        "quarantine_relative_path": entry.quarantine_relative_path,
+        "content_sha256": entry.content_sha256,
+        "size_bytes": entry.size_bytes,
+        "status": entry.status,
     }

@@ -234,10 +234,11 @@ class ExternalActionService:
 
         task_id: UUID | None = None
         if evaluation.decision == "allow_auto":
+            task_payload = {**arguments, "action_id": str(action.id)}
             task, _ = enqueue_task_with_status(
                 self.session,
                 kind=TaskKind.CONTROL,
-                payload=arguments,
+                payload=task_payload,
                 idempotency_key=f"file-action:{action.id}",
                 capability=request.action,
                 side_effect_certainty=SideEffectCertainty.READ_ONLY,

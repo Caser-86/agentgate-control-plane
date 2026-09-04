@@ -17,6 +17,7 @@ def test_file_task_rejects_absolute_path_and_unknown_field() -> None:
     with pytest.raises(ValidationError):
         FileInspectTask.model_validate(
             {
+                "action_id": str(uuid4()),
                 "workspace_id": str(uuid4()),
                 "workspace_version": 1,
                 "relative_path": r"C:\secret.txt",
@@ -38,6 +39,7 @@ def test_file_task_is_safe_only_when_capability_matches_schema() -> None:
         kind=TaskKind.CONTROL,
         capability="file.inspect.v1",
         payload={
+            "action_id": str(uuid4()),
             "workspace_id": str(uuid4()),
             "workspace_version": 1,
             "relative_path": "notes.txt",

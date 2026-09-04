@@ -348,7 +348,7 @@ Expected: all protocol tests pass; a malformed payload is rejected before any ex
 - Produces `QuarantineService.restore(context: WorkspaceContext, entry: QuarantineEntryView) -> RestoreResult`.
 - Produces `recover_incomplete_journal(journal_path: Path) -> list[RecoveryNotice]`; recovery must mark uncertain side effects for manual review rather than blindly retrying a move.
 
-- [ ] **Step 1: Write unit and real-NTFS acceptance tests**
+- [x] **Step 1: Write unit and real-NTFS acceptance tests**
 
 ```python
 def test_inspect_returns_metadata_and_sha256_without_content(temp_workspace):
@@ -373,17 +373,17 @@ def test_quarantine_then_restore_preserves_digest_and_never_overwrites(temp_work
     assert original.read_bytes() == b"stable"
 ```
 
-- [ ] **Step 2: Run Worker tests before implementation**
+- [x] **Step 2: Run Worker tests before implementation**
 
 Run: `Set-Location apps/worker; .\.venv\Scripts\python.exe -m pytest tests/test_filesystem.py tests/test_quarantine.py tests/test_file_actions_windows.py -q`
 
 Expected: failures for missing connector/service and for the unimplemented Windows contract script.
 
-- [ ] **Step 3: Implement handle-based path and file-type verification**
+- [x] **Step 3: Implement handle-based path and file-type verification**
 
 Resolve the relative path beneath the Worker-provided canonical root, reject any parent component that is a reparse point, open the final target with a read-only handle and no directory access, obtain the final handle path with the Windows API, compare it case-insensitively against the canonical workspace root, reject directories, device files, named pipes, alternate data streams and all reparse points, and only then read metadata/hash. Do not call a shell or construct a shell command. Keep hashing streaming with a bounded buffer and return only size, timestamps, file type and SHA-256.
 
-- [ ] **Step 4: Implement same-volume quarantine, restore, journal and result semantics**
+- [x] **Step 4: Implement same-volume quarantine, restore, journal and result semantics**
 
 Generate the quarantine relative name from action ID and a sanitized relative-path digest, create parent directories beneath the Worker-provided quarantine root, verify the destination is on the same volume, write a journal record before the side effect containing action ID, workspace version, source relative path, destination relative path, expected digest and phase, perform an atomic same-volume move with write-through semantics, hash and verify the quarantined file, then append the completed journal record. On restore, use only the stored entry ID/context, verify the quarantined digest, require the original target to be absent, move back atomically, and return `destination_conflict` if it exists. A repeated action ID or already-restored entry returns the original success result without moving again. If a process stops between journal phases, recovery records `manual_review_required` unless disk facts prove the move did not start or completed exactly as journaled.
 
@@ -397,7 +397,7 @@ class QuarantineService:
         raise NotImplementedError
 ```
 
-- [ ] **Step 5: Run Windows contract, Worker suite, and commit**
+- [x] **Step 5: Run Windows contract, Worker suite, and commit**
 
 Run: `pwsh -NoProfile -File scripts/file-action.contract.test.ps1`
 

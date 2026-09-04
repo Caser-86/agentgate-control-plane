@@ -1,7 +1,6 @@
 import fnmatch
 import ntpath
-import os
-from pathlib import Path, PureWindowsPath
+from pathlib import PureWindowsPath
 
 DEFAULT_PROTECTED_PATTERNS = [
     ".git/**",
@@ -65,9 +64,11 @@ def _canonical_local_path(value: str) -> str:
     drive, _ = ntpath.splitdrive(normalized)
     if not drive or normalized.startswith(("\\\\", "\\?\\", "\\.\\")):
         raise InvalidManagedRoot("only local drive paths are allowed")
-    if not os.path.isabs(value):
+    if not ntpath.isabs(value):
         raise InvalidManagedRoot("root path must be absolute")
-    return str(Path(value).resolve(strict=False))
+    # The API may run in Linux/WSL while the Worker owns the Windows filesystem.
+    # Do not resolve a Windows path through the API host's filesystem.
+    return normalized
 
 
 def validate_managed_root(root_path: str, allowed_root: str) -> str:

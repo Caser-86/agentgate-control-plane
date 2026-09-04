@@ -11,6 +11,7 @@ POLICY_VERSION = "file-policy.v1"
 class FileTaskBase(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
+    action_id: UUID
     workspace_id: UUID
     workspace_version: int = Field(gt=0)
     arguments_digest: str = Field(pattern=r"^[0-9a-f]{64}$")

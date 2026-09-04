@@ -3,7 +3,8 @@ import ntpath
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Protocol
+from pathlib import Path
+from typing import TYPE_CHECKING, Protocol
 from urllib.parse import urlsplit
 from uuid import UUID
 
@@ -17,6 +18,9 @@ from agentgate_worker.probes import (
     validate_windows_service_name,
 )
 from agentgate_worker.vault import WorkerCredentials, WorkerVault
+
+if TYPE_CHECKING:
+    from agentgate_worker.quarantine import QuarantineEntryView
 
 PROTOCOL_VERSION = "1.0"
 SELF_CHECK_CAPABILITY = "platform.self_check"
@@ -107,6 +111,53 @@ def sanitize_monitor_result(result: dict[str, object]) -> dict[str, object]:
     return safe
 
 
+def sanitize_file_result(result: dict[str, object]) -> dict[str, object]:
+    if not isinstance(result, dict):
+        raise WorkerProtocolError("Worker file result must be an object")
+    status = result.get("status")
+    if status not in {"succeeded", "failed"}:
+        raise WorkerProtocolError("Worker file result has an unsupported status")
+    result_kind = result.get("result_kind")
+    side_effect = result.get("side_effect")
+    if result_kind not in {"file_metadata", "file_quarantine", "file_restore"}:
+        raise WorkerProtocolError("Worker file result has an unsupported result kind")
+    if side_effect not in {"none", "quarantined", "restored", "conflict"}:
+        raise WorkerProtocolError("Worker file result has an unsupported side effect")
+    safe: dict[str, object] = {
+        "status": status,
+        "result_kind": result_kind,
+        "side_effect": side_effect,
+    }
+    digest = result.get("content_sha256")
+    if digest is not None:
+        if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise WorkerProtocolError("Worker file result has an invalid digest")
+        safe["content_sha256"] = digest
+    elif status == "succeeded":
+        raise WorkerProtocolError("Worker file result is missing digest")
+    size_bytes = result.get("size_bytes")
+    if size_bytes is not None:
+        if not isinstance(size_bytes, int) or isinstance(size_bytes, bool) or size_bytes < 0:
+            raise WorkerProtocolError("Worker file result has an invalid size")
+        safe["size_bytes"] = size_bytes
+    elif status == "succeeded":
+        raise WorkerProtocolError("Worker file result is missing size")
+    for key in ("error_code", "error_message"):
+        value = result.get(key)
+        if isinstance(value, str):
+            safe[key] = value[:256]
+    entry_id = result.get("quarantine_entry_id")
+    if entry_id is not None:
+        try:
+            safe["quarantine_entry_id"] = str(UUID(str(entry_id)))
+        except (TypeError, ValueError) as error:
+            raise WorkerProtocolError("Worker file result has an invalid entry ID") from error
+    relative = result.get("quarantine_relative_path")
+    if relative is not None:
+        safe["quarantine_relative_path"] = _safe_file_relative_path(relative)
+    return safe
+
+
 def _safe_file_relative_path(value: object) -> str:
     if not isinstance(value, str) or not value or "\x00" in value:
         raise WorkerProtocolError("Worker received an unsafe file path")
@@ -125,15 +176,27 @@ def _safe_task_payload(payload: object, capability: str | None = None) -> dict[s
     if capability in FILE_CAPABILITIES:
         expected = {
             "file.inspect.v1": {
-                "workspace_id", "workspace_version", "relative_path", "arguments_digest",
+                "action_id",
+                "workspace_id",
+                "workspace_version",
+                "relative_path",
+                "arguments_digest",
                 "policy_version",
             },
             "file.quarantine.v1": {
-                "workspace_id", "workspace_version", "relative_path", "arguments_digest",
+                "action_id",
+                "workspace_id",
+                "workspace_version",
+                "relative_path",
+                "arguments_digest",
                 "policy_version", "reason",
             },
             "file.restore.v1": {
-                "workspace_id", "workspace_version", "quarantine_entry_id", "arguments_digest",
+                "action_id",
+                "workspace_id",
+                "workspace_version",
+                "quarantine_entry_id",
+                "arguments_digest",
                 "policy_version",
             },
         }[capability]
@@ -141,7 +204,11 @@ def _safe_task_payload(payload: object, capability: str | None = None) -> dict[s
             raise WorkerProtocolError("Worker received an unsafe file task payload")
         try:
             UUID(str(payload["workspace_id"]))
-            if not isinstance(payload["workspace_version"], int) or payload["workspace_version"] <= 0:
+            UUID(str(payload["action_id"]))
+            if (
+                not isinstance(payload["workspace_version"], int)
+                or payload["workspace_version"] <= 0
+            ):
                 raise ValueError
             if not isinstance(payload["arguments_digest"], str) or not re.fullmatch(
                 r"[0-9a-f]{64}", payload["arguments_digest"]
@@ -190,6 +257,8 @@ def _safe_task_payload(payload: object, capability: str | None = None) -> dict[s
 
 
 def sanitize_result_for_grant(grant: "TaskGrant", result: dict[str, object]) -> dict[str, object]:
+    if getattr(grant, "capability", "") in FILE_CAPABILITIES:
+        return sanitize_file_result(result)
     payload = getattr(grant, "payload", {"task_type": SELF_CHECK_CAPABILITY})
     if payload.get("task_type") == SELF_CHECK_CAPABILITY:
         return sanitize_self_check_result(result)
@@ -242,6 +311,7 @@ class TaskGrant:
     request_digest: str
     lease_expires_at: datetime
     payload: dict[str, object]
+    capability: str = ""
 
 
 @dataclass(frozen=True)
@@ -287,6 +357,8 @@ class WorkerClient:
                 "capabilities": sorted(self.capabilities),
             },
         )
+        if not isinstance(response, dict):
+            raise WorkerProtocolError("Worker registration response was malformed")
         try:
             credentials = WorkerCredentials(
                 worker_id=str(response["worker_id"]),
@@ -337,8 +409,12 @@ class WorkerClient:
         if not response:
             return None
         try:
-            capability = str(response["capability"])
-            payload = _safe_task_payload(response["payload"], capability)
+            raw_payload = response["payload"]
+            raw_capability = response.get("capability")
+            if raw_capability is None and isinstance(raw_payload, dict):
+                raw_capability = raw_payload.get("task_type")
+            capability = str(raw_capability or "")
+            payload = _safe_task_payload(raw_payload, capability)
             lease = datetime.fromisoformat(str(response["lease_expires_at"]))
             if lease.tzinfo is None:
                 lease = lease.replace(tzinfo=UTC)
@@ -348,6 +424,7 @@ class WorkerClient:
                 request_digest=str(response["request_digest"]),
                 lease_expires_at=lease,
                 payload=payload,
+                capability=capability,
             )
         except (KeyError, TypeError, ValueError) as error:
             raise WorkerProtocolError("Worker claim response was malformed") from error
@@ -365,7 +442,12 @@ class WorkerClient:
         if not isinstance(response, dict):
             raise WorkerProtocolError("Worker workspace context was malformed")
         try:
-            if str(response["workspace_id"]) != workspace_id or int(response["version"]) != version:
+            response_version = response["version"]
+            if (
+                str(response["workspace_id"]) != workspace_id
+                or not isinstance(response_version, int)
+                or response_version != version
+            ):
                 raise ValueError
             root_path = response["root_path"]
             quarantine_root_path = response["quarantine_root_path"]
@@ -385,6 +467,65 @@ class WorkerClient:
             root_path=root_path,
             quarantine_root_path=quarantine_root_path,
             protected_patterns=tuple(patterns),
+        )
+
+    def get_quarantine_entry(
+        self, grant: TaskGrant, context: WorkspaceContext
+    ) -> "QuarantineEntryView":
+        from agentgate_worker.quarantine import QuarantineEntryView
+
+        entry_id = grant.payload.get("quarantine_entry_id")
+        if not isinstance(entry_id, str):
+            raise WorkerProtocolError("Worker received an unsafe quarantine entry ID")
+        response = self._request(
+            "GET",
+            f"/api/v1/worker/quarantine-entries/{entry_id}"
+            f"?version={context.version}&task_id={grant.task_id}",
+            {},
+        )
+        if not isinstance(response, dict):
+            raise WorkerProtocolError("Worker quarantine entry was malformed")
+        try:
+            returned_id = UUID(str(response["id"]))
+            action_id = UUID(str(response["action_id"]))
+            workspace_id = str(response["workspace_id"])
+            version = response["workspace_version"]
+            original_relative_path = _safe_file_relative_path(
+                response["original_relative_path"]
+            )
+            quarantine_relative_path = _safe_file_relative_path(
+                response["quarantine_relative_path"]
+            )
+            content_sha256 = str(response["content_sha256"])
+            size_bytes = response["size_bytes"]
+            status = str(response["status"])
+            if (
+                returned_id != UUID(entry_id)
+                or workspace_id != context.workspace_id
+                or not isinstance(version, int)
+                or version != context.version
+                or not re.fullmatch(r"[0-9a-f]{64}", content_sha256)
+                or not isinstance(size_bytes, int)
+                or isinstance(size_bytes, bool)
+                or size_bytes < 0
+                or status not in {"quarantined", "restored"}
+            ):
+                raise ValueError
+        except (KeyError, TypeError, ValueError) as error:
+            raise WorkerProtocolError("Worker quarantine entry was malformed") from error
+        quarantine_absolute_path = Path(context.quarantine_root_path).joinpath(
+            *quarantine_relative_path.split("/")
+        )
+        return QuarantineEntryView(
+            id=returned_id,
+            workspace_id=workspace_id,
+            action_id=action_id,
+            original_relative_path=original_relative_path,
+            quarantine_relative_path=quarantine_relative_path,
+            quarantine_absolute_path=str(quarantine_absolute_path),
+            content_sha256=content_sha256,
+            size_bytes=size_bytes,
+            status=status,
         )
 
     def start(self, grant: TaskGrant) -> None:
@@ -444,3 +585,71 @@ class WorkerClient:
         if task_type == SELF_CHECK_CAPABILITY:
             return self.self_check_result()
         raise WorkerProtocolError("Worker received an unsupported task payload")
+
+    def file_result(self, grant: TaskGrant) -> dict[str, object]:
+        from agentgate_worker.filesystem import FileActionError, FileConnector
+        from agentgate_worker.quarantine import QuarantineService
+
+        capability = grant.capability
+        if capability not in FILE_CAPABILITIES:
+            raise WorkerProtocolError("Worker received an unsupported file task")
+        context = self.get_workspace_context(grant)
+        try:
+            if capability == "file.inspect.v1":
+                relative_path = grant.payload["relative_path"]
+                metadata = FileConnector().inspect(context, str(relative_path))
+                return {
+                    "status": "succeeded",
+                    "result_kind": "file_metadata",
+                    "side_effect": "none",
+                    "content_sha256": metadata.content_sha256,
+                    "size_bytes": metadata.size_bytes,
+                }
+            service = QuarantineService(self.journal.path.with_name("file-actions.jsonl"))
+            if capability == "file.quarantine.v1":
+                quarantine_result = service.quarantine(
+                    context,
+                    UUID(str(grant.payload["action_id"])),
+                    str(grant.payload["relative_path"]),
+                )
+                return {
+                    "status": "succeeded",
+                    "result_kind": "file_quarantine",
+                    "side_effect": "quarantined",
+                    "content_sha256": quarantine_result.content_sha256,
+                    "size_bytes": quarantine_result.size_bytes,
+                    "quarantine_entry_id": str(quarantine_result.entry.id),
+                    "quarantine_relative_path": quarantine_result.entry.quarantine_relative_path,
+                }
+            entry = self.get_quarantine_entry(grant, context)
+            result = service.restore(context, entry)
+            if result.status == "destination_conflict":
+                return {
+                    "status": "failed",
+                    "result_kind": "file_restore",
+                    "side_effect": "conflict",
+                    "content_sha256": result.content_sha256,
+                    "size_bytes": result.size_bytes,
+                    "error_code": "destination_conflict",
+                    "error_message": "恢复目标已存在，未覆盖",
+                }
+            return {
+                "status": "succeeded",
+                "result_kind": "file_restore",
+                "side_effect": "restored",
+                "content_sha256": result.content_sha256,
+                "size_bytes": result.size_bytes,
+            }
+        except FileActionError as error:
+            result_kind = (
+                "file_metadata"
+                if capability == "file.inspect.v1"
+                else "file_quarantine"
+            )
+            return {
+                "status": "failed",
+                "result_kind": result_kind,
+                "side_effect": "none",
+                "error_code": error.code,
+                "error_message": error.message,
+            }
