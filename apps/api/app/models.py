@@ -4,6 +4,7 @@ from enum import Enum
 from typing import Any
 from uuid import UUID, uuid4
 
+from sqlalchemy import UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 
@@ -65,6 +66,11 @@ class AgentRun(SQLModel, table=True):
 
 class ToolAction(SQLModel, table=True):
     __tablename__ = "tool_actions"
+    __table_args__ = (
+        UniqueConstraint(
+            "proposer_client_id", "idempotency_key", name="uq_tool_actions_client_idempotency"
+        ),
+    )
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     run_id: UUID | None = Field(default=None, foreign_key="agent_runs.id", index=True)
@@ -84,7 +90,7 @@ class ToolAction(SQLModel, table=True):
     arguments_json: str = Field(default="{}")
     result_json: str | None = None
     reason: str = ""
-    idempotency_key: str = Field(unique=True, index=True)
+    idempotency_key: str = Field(index=True)
     created_at: datetime = Field(default_factory=utc_now, index=True)
     decided_at: datetime | None = None
     executed_at: datetime | None = None

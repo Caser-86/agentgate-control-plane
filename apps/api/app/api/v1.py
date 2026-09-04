@@ -1,7 +1,7 @@
 from typing import Annotated
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import ValidationError
 from sqlmodel import Session, select
 
@@ -19,7 +19,9 @@ from app.schemas import (
     ProposalResponse,
     TaskStatusResponse,
 )
+from app.schemas_actions import ActionStatusResponse, ExternalActionRequest
 from app.services.audit import AuditService, redact
+from app.services.file_actions import ExternalActionError, ExternalActionService
 from app.tools.registry import RegisteredTool, ToolRegistry, UnknownToolError
 
 router = APIRouter(prefix="/api/v1", tags=["v1"])
@@ -163,11 +165,41 @@ def get_check_status(
     )
 
 
-@router.post("/actions", response_model=ProposalResponse)
+@router.post("/actions", response_model=ActionStatusResponse | ProposalResponse)
 def propose_action(
-    request: ActionProposalRequest, _: ActionClientDep, session: SessionDep
-) -> ProposalResponse:
-    del session
+    request: ActionProposalRequest,
+    client: ActionClientDep,
+    session: SessionDep,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> ActionStatusResponse | ProposalResponse:
+    if request.action is not None:
+        if request.workspace_id is None or idempotency_key is None:
+            raise HTTPException(
+                status_code=422,
+                detail={"code": "missing_idempotency_key", "message": "文件动作必须提供幂等键"},
+            )
+        try:
+            file_request = ExternalActionRequest(
+                action=request.action,
+                workspace_id=request.workspace_id,
+                relative_path=request.relative_path,
+                quarantine_entry_id=request.quarantine_entry_id,
+                reason=request.reason,
+            )
+            return ExternalActionService(session).propose(
+                UUID(client.token_id), file_request, idempotency_key
+            )
+        except ExternalActionError as error:
+            raise HTTPException(
+                status_code=error.status_code,
+                detail={"code": error.code, "message": error.message},
+            ) from error
+
+    if request.action_type is None or request.target is None:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "invalid_proposal", "message": "动作参数不完整"},
+        )
     registered, normalized = _validate_registered_target(
         ToolRegistry(), request.action_type, request.target, request.parameters
     )
@@ -178,3 +210,16 @@ def propose_action(
         "deny": "deny",
     }[decision]
     return ProposalResponse(decision=external_decision)
+
+
+@router.get("/actions/{action_id}", response_model=ActionStatusResponse)
+def get_action_status(
+    action_id: UUID, client: ActionClientDep, session: SessionDep
+) -> ActionStatusResponse:
+    try:
+        return ExternalActionService(session).get_status(UUID(client.token_id), action_id)
+    except ExternalActionError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail={"code": error.code, "message": error.message},
+        ) from error

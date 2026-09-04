@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class CreateRunRequest(BaseModel):
@@ -66,9 +66,22 @@ class CheckProposalRequest(BaseModel):
 class ActionProposalRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    action_type: str = Field(min_length=1, max_length=120)
-    target: str = Field(min_length=1, max_length=120)
+    action_type: str | None = Field(default=None, min_length=1, max_length=120)
+    target: str | None = Field(default=None, min_length=1, max_length=120)
     parameters: dict[str, object] = Field(default_factory=dict)
+    action: str | None = Field(default=None, min_length=1, max_length=64)
+    workspace_id: UUID | None = None
+    relative_path: str | None = Field(default=None, max_length=4000)
+    quarantine_entry_id: UUID | None = None
+    reason: str | None = Field(default=None, max_length=500)
+
+    @model_validator(mode="after")
+    def validate_legacy_or_file_action(self) -> "ActionProposalRequest":
+        if self.action is None and (self.action_type is None or self.target is None):
+            raise ValueError("action_type/target or action/workspace_id is required")
+        if self.action is not None and self.workspace_id is None:
+            raise ValueError("workspace_id is required for a file action")
+        return self
 
 
 class ProposalResponse(BaseModel):
@@ -90,7 +103,7 @@ class AgentRunResponse(BaseModel):
 
 class ToolActionResponse(BaseModel):
     id: UUID
-    run_id: UUID
+    run_id: UUID | None
     tool_call_id: str
     tool_name: str
     risk_level: str
