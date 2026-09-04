@@ -202,6 +202,8 @@ Expected: all tests pass and disabled/nonexistent/version-conflict workspaces re
 **Files:**
 - Create: `apps/api/app/services/file_actions.py`
 - Create: `apps/api/app/schemas_actions.py`
+- Create: `apps/api/migrations/versions/0011_scoped_action_idempotency.py`
+- Modify: `apps/api/app/models.py`
 - Modify: `apps/api/app/policy.py`
 - Modify: `apps/api/app/api/v1.py`
 - Modify: `apps/api/app/control/repositories.py`
