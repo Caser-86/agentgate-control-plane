@@ -51,6 +51,7 @@
 - Create: `apps/api/app/files/security.py`
 - Modify: `apps/api/app/models.py`
 - Modify: `apps/api/app/db.py`
+- Modify: `apps/api/migrations/env.py`
 - Create: `apps/api/migrations/versions/0010_file_action_governance.py`
 - Test: `apps/api/tests/test_file_models.py`
 - Test: `apps/api/tests/test_file_security.py`
@@ -129,7 +130,8 @@ Expected: all focused tests pass, with migration head `0010_file_action_governan
 **Files:**
 - Create: `apps/api/app/services/workspaces.py`
 - Create: `apps/api/app/api/workspaces.py`
-- Create: `apps/api/app/schemas/workspaces.py`
+- Create: `apps/api/app/schemas_workspaces.py`
+- Modify: `apps/api/app/config.py`
 - Modify: `apps/api/app/main.py`
 - Test: `apps/api/tests/test_workspaces_api.py`
 - Test: `apps/api/tests/test_workspace_service.py`
@@ -199,7 +201,7 @@ Expected: all tests pass and disabled/nonexistent/version-conflict workspaces re
 
 **Files:**
 - Create: `apps/api/app/services/file_actions.py`
-- Create: `apps/api/app/schemas/actions.py`
+- Create: `apps/api/app/schemas_actions.py`
 - Modify: `apps/api/app/policy.py`
 - Modify: `apps/api/app/api/v1.py`
 - Modify: `apps/api/app/control/repositories.py`
@@ -268,7 +270,7 @@ Expected: policy matrix, persisted deny, approval creation, auto task creation, 
 ### Task 4: 扩展 Worker 协议、执行上下文和断线安全语义
 
 **Files:**
-- Create: `apps/api/app/schemas/worker_files.py`
+- Create: `apps/api/app/schemas_worker_files.py`
 - Modify: `apps/api/app/services/worker_protocol.py`
 - Create: `apps/api/app/api/worker.py`
 - Modify: `apps/api/app/main.py`
