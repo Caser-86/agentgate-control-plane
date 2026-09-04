@@ -286,8 +286,8 @@ Expected: policy matrix, persisted deny, approval creation, auto task creation, 
 **Interfaces:**
 - Produces `FILE_CAPABILITIES = frozenset({"file.inspect.v1", "file.quarantine.v1", "file.restore.v1"})`.
 - Produces strict Pydantic payload models `FileInspectTask`, `FileQuarantineTask`, and `FileRestoreTask` with `extra="forbid"`.
-- Adds protected `GET /api/v1/worker/workspaces/{workspace_id}?version={workspace_version}` returning `WorkspaceContext` only to a registered Worker with a valid execution grant.
-- Produces Worker client methods `get_workspace_context(workspace_id: UUID, version: int) -> WorkspaceContext` and `execute_file_task(task: ControlTask) -> FileTaskResult`.
+- Adds protected `GET /api/v1/worker/workspaces/{workspace_id}?version={workspace_version}&task_id={task_id}` returning `WorkspaceContext` only to a registered Worker with a valid execution grant.
+- Produces Worker client method `get_workspace_context(grant: TaskGrant) -> WorkspaceContext`; the grant carries the task ID used to authorize the context request.
 
 - [ ] **Step 1: Write protocol rejection and context authorization tests**
 
