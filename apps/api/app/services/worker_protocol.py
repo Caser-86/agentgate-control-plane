@@ -1,11 +1,12 @@
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from datetime import UTC
 from typing import Annotated, Any, cast
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 from sqlalchemy import update
 from sqlmodel import Session, select
 
@@ -21,16 +22,25 @@ from app.monitoring.enums import (
     ProbeStatus,
 )
 from app.repositories import AuditRepository
+from app.schemas_worker_files import (
+    FileInspectTask,
+    FileQuarantineTask,
+    FileRestoreTask,
+)
 from app.services.audit import AuditService
 from app.services.monitoring import validate_http_endpoint, validate_windows_service_name
 
 PROTOCOL_VERSION = "1.0"
 SELF_CHECK_CAPABILITY = "platform.self_check"
+FILE_CAPABILITIES = frozenset(
+    {"file.inspect.v1", "file.quarantine.v1", "file.restore.v1"}
+)
 SUPPORTED_CAPABILITIES = frozenset(
     {SELF_CHECK_CAPABILITY, HTTP_MONITOR_CAPABILITY, WINDOWS_SERVICE_MONITOR_CAPABILITY}
+    | FILE_CAPABILITIES
 )
 MAX_RESULT_BYTES = 4096
-MAX_CAPABILITIES = 3
+MAX_CAPABILITIES = 6
 SELF_CHECK_RESULT_KEYS = frozenset(
     {"status", "detail", "worker_version", "protocol_version", "capabilities"}
 )
@@ -165,6 +175,44 @@ def sanitize_monitor_result(result: dict[str, object]) -> dict[str, object]:
     return safe
 
 
+def sanitize_file_result(result: dict[str, object]) -> dict[str, object]:
+    if not isinstance(result, dict):
+        raise WorkerProtocolError(422, "invalid_result")
+    status = result.get("status")
+    if status not in {"succeeded", "failed"}:
+        raise WorkerProtocolError(422, "invalid_result")
+    result_kind = result.get("result_kind")
+    side_effect = result.get("side_effect")
+    digest = result.get("content_sha256")
+    size_bytes = result.get("size_bytes")
+    if not isinstance(result_kind, str) or result_kind not in {
+        "file_metadata", "file_quarantine", "file_restore"
+    }:
+        raise WorkerProtocolError(422, "invalid_result")
+    if not isinstance(side_effect, str) or side_effect not in {
+        "none", "quarantined", "restored", "conflict"
+    }:
+        raise WorkerProtocolError(422, "invalid_result")
+    if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+        raise WorkerProtocolError(422, "invalid_result")
+    if not isinstance(size_bytes, int) or isinstance(size_bytes, bool) or size_bytes < 0:
+        raise WorkerProtocolError(422, "invalid_result")
+    safe: dict[str, object] = {
+        "status": status,
+        "result_kind": result_kind,
+        "side_effect": side_effect,
+        "content_sha256": digest,
+        "size_bytes": size_bytes,
+    }
+    for key in ("error_code", "error_message"):
+        value = result.get(key)
+        if isinstance(value, str):
+            safe[key] = value[:256]
+    if len(_canonical_json(safe)) > MAX_RESULT_BYTES:
+        raise WorkerProtocolError(422, "result_too_large")
+    return safe
+
+
 def sanitize_result_for_task(task: ControlTask, result: dict[str, object]) -> dict[str, object]:
     if task.capability == SELF_CHECK_CAPABILITY:
         return sanitize_self_check_result(result)
@@ -173,6 +221,8 @@ def sanitize_result_for_task(task: ControlTask, result: dict[str, object]) -> di
         WINDOWS_SERVICE_MONITOR_CAPABILITY,
     }:
         return sanitize_monitor_result(result)
+    if task.capability in FILE_CAPABILITIES:
+        return sanitize_file_result(result)
     raise WorkerProtocolError(403, "unsupported_worker_capability")
 
 
@@ -280,6 +330,19 @@ def _task_is_safe_monitor(task: ControlTask) -> bool:
 
 
 def _task_is_safe(task: ControlTask) -> bool:
+    if task.capability in FILE_CAPABILITIES:
+        model = cast(Any, {
+            "file.inspect.v1": FileInspectTask,
+            "file.quarantine.v1": FileQuarantineTask,
+            "file.restore.v1": FileRestoreTask,
+        }[task.capability])
+        if task.kind != TaskKind.CONTROL or not isinstance(task.payload, dict):
+            return False
+        try:
+            model.model_validate(task.payload)
+        except ValidationError:
+            return False
+        return True
     return (
         task.kind == TaskKind.CONTROL
         and (

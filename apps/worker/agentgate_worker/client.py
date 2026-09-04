@@ -1,4 +1,6 @@
 import ipaddress
+import ntpath
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Protocol
@@ -20,8 +22,12 @@ PROTOCOL_VERSION = "1.0"
 SELF_CHECK_CAPABILITY = "platform.self_check"
 HTTP_MONITOR_CAPABILITY = "monitor.http"
 WINDOWS_SERVICE_MONITOR_CAPABILITY = "monitor.windows_service"
+FILE_CAPABILITIES = frozenset(
+    {"file.inspect.v1", "file.quarantine.v1", "file.restore.v1"}
+)
 SUPPORTED_CAPABILITIES = frozenset(
     {SELF_CHECK_CAPABILITY, HTTP_MONITOR_CAPABILITY, WINDOWS_SERVICE_MONITOR_CAPABILITY}
+    | FILE_CAPABILITIES
 )
 SELF_CHECK_RESULT_KEYS = frozenset(
     {"status", "detail", "worker_version", "protocol_version", "capabilities"}
@@ -101,9 +107,60 @@ def sanitize_monitor_result(result: dict[str, object]) -> dict[str, object]:
     return safe
 
 
-def _safe_task_payload(payload: object) -> dict[str, object]:
+def _safe_file_relative_path(value: object) -> str:
+    if not isinstance(value, str) or not value or "\x00" in value:
+        raise WorkerProtocolError("Worker received an unsafe file path")
+    normalized = value.replace("\\", "/")
+    if normalized.startswith("/") or ntpath.splitdrive(normalized)[0]:
+        raise WorkerProtocolError("Worker received an unsafe file path")
+    segments = normalized.split("/")
+    if any(not segment or segment in {".", ".."} or ":" in segment for segment in segments):
+        raise WorkerProtocolError("Worker received an unsafe file path")
+    return normalized
+
+
+def _safe_task_payload(payload: object, capability: str | None = None) -> dict[str, object]:
     if not isinstance(payload, dict):
         raise WorkerProtocolError("Worker received an unsafe task payload")
+    if capability in FILE_CAPABILITIES:
+        expected = {
+            "file.inspect.v1": {
+                "workspace_id", "workspace_version", "relative_path", "arguments_digest",
+                "policy_version",
+            },
+            "file.quarantine.v1": {
+                "workspace_id", "workspace_version", "relative_path", "arguments_digest",
+                "policy_version", "reason",
+            },
+            "file.restore.v1": {
+                "workspace_id", "workspace_version", "quarantine_entry_id", "arguments_digest",
+                "policy_version",
+            },
+        }[capability]
+        if set(payload) != expected:
+            raise WorkerProtocolError("Worker received an unsafe file task payload")
+        try:
+            UUID(str(payload["workspace_id"]))
+            if not isinstance(payload["workspace_version"], int) or payload["workspace_version"] <= 0:
+                raise ValueError
+            if not isinstance(payload["arguments_digest"], str) or not re.fullmatch(
+                r"[0-9a-f]{64}", payload["arguments_digest"]
+            ):
+                raise ValueError
+            if payload["policy_version"] != "file-policy.v1":
+                raise ValueError
+            if "relative_path" in payload:
+                _safe_file_relative_path(payload["relative_path"])
+            if "quarantine_entry_id" in payload:
+                UUID(str(payload["quarantine_entry_id"]))
+            if "reason" in payload and (
+                not isinstance(payload["reason"], str)
+                or not 1 <= len(payload["reason"]) <= 500
+            ):
+                raise ValueError
+        except (TypeError, ValueError) as error:
+            raise WorkerProtocolError("Worker received an unsafe file task payload") from error
+        return payload
     task_type = payload.get("task_type")
     if task_type == SELF_CHECK_CAPABILITY:
         if payload != {"task_type": SELF_CHECK_CAPABILITY}:
@@ -142,7 +199,7 @@ def sanitize_result_for_grant(grant: "TaskGrant", result: dict[str, object]) -> 
 class Transport(Protocol):
     def request(
         self, method: str, path: str, *, headers: dict[str, str], json: dict[str, object]
-    ) -> dict[str, object]: ...
+    ) -> dict[str, object] | None: ...
 
 
 class HttpTransport:
@@ -151,7 +208,7 @@ class HttpTransport:
 
     def request(
         self, method: str, path: str, *, headers: dict[str, str], json: dict[str, object]
-    ) -> dict[str, object]:
+    ) -> dict[str, object] | None:
         try:
             response = httpx.request(
                 method, f"{self.base_url}{path}", headers=headers, json=json, timeout=10.0
@@ -163,6 +220,8 @@ class HttpTransport:
             payload = response.json()
         except (httpx.HTTPError, ValueError) as error:
             raise WorkerProtocolError("Worker API request unavailable") from error
+        if payload is None:
+            return None
         if not isinstance(payload, dict):
             raise WorkerProtocolError("Worker API returned malformed payload")
         return payload
@@ -183,6 +242,15 @@ class TaskGrant:
     request_digest: str
     lease_expires_at: datetime
     payload: dict[str, object]
+
+
+@dataclass(frozen=True)
+class WorkspaceContext:
+    workspace_id: str
+    version: int
+    root_path: str
+    quarantine_root_path: str
+    protected_patterns: tuple[str, ...]
 
 
 class WorkerClient:
@@ -248,7 +316,9 @@ class WorkerClient:
             raise WorkerProtocolError("Worker is not registered")
         return credentials
 
-    def _request(self, method: str, path: str, payload: dict[str, object]) -> dict[str, object]:
+    def _request(
+        self, method: str, path: str, payload: dict[str, object]
+    ) -> dict[str, object] | None:
         credentials = self._credentials()
         return self.transport.request(
             method,
@@ -267,7 +337,8 @@ class WorkerClient:
         if not response:
             return None
         try:
-            payload = _safe_task_payload(response["payload"])
+            capability = str(response["capability"])
+            payload = _safe_task_payload(response["payload"], capability)
             lease = datetime.fromisoformat(str(response["lease_expires_at"]))
             if lease.tzinfo is None:
                 lease = lease.replace(tzinfo=UTC)
@@ -280,6 +351,41 @@ class WorkerClient:
             )
         except (KeyError, TypeError, ValueError) as error:
             raise WorkerProtocolError("Worker claim response was malformed") from error
+
+    def get_workspace_context(self, grant: TaskGrant) -> WorkspaceContext:
+        workspace_id = grant.payload.get("workspace_id")
+        version = grant.payload.get("workspace_version")
+        if not isinstance(workspace_id, str) or not isinstance(version, int):
+            raise WorkerProtocolError("Worker received an unsafe file task payload")
+        response = self._request(
+            "GET",
+            f"/api/v1/worker/workspaces/{workspace_id}?version={version}&task_id={grant.task_id}",
+            {},
+        )
+        if not isinstance(response, dict):
+            raise WorkerProtocolError("Worker workspace context was malformed")
+        try:
+            if str(response["workspace_id"]) != workspace_id or int(response["version"]) != version:
+                raise ValueError
+            root_path = response["root_path"]
+            quarantine_root_path = response["quarantine_root_path"]
+            patterns = response["protected_patterns"]
+            if (
+                not isinstance(root_path, str)
+                or not isinstance(quarantine_root_path, str)
+                or not isinstance(patterns, list)
+                or not all(isinstance(item, str) for item in patterns)
+            ):
+                raise ValueError
+        except (KeyError, TypeError, ValueError) as error:
+            raise WorkerProtocolError("Worker workspace context was malformed") from error
+        return WorkspaceContext(
+            workspace_id=workspace_id,
+            version=version,
+            root_path=root_path,
+            quarantine_root_path=quarantine_root_path,
+            protected_patterns=tuple(patterns),
+        )
 
     def start(self, grant: TaskGrant) -> None:
         self._request(
