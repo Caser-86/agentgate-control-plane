@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session
 
 from app.api.runs import to_action_response
-from app.db import seed_demo_state
+from app.db import seed_example_state
 from app.models import ActionStatus, PolicyDecision, RiskLevel, ToolAction
 from app.processes.control_worker import ControlWorker
 from app.services.runs import RunService
@@ -17,7 +17,7 @@ from tests.conftest import authenticate_client
 def api_client(auth_client: tuple[TestClient, object, object]) -> tuple[TestClient, object]:
     client, engine, token_file = auth_client
     with Session(engine) as session:
-        seed_demo_state(session)
+        seed_example_state(session)
     authenticate_client(client, token_file)
     return client, engine
 

@@ -33,21 +33,21 @@ def make_response(*, arguments: str = '{"service":"payments-api"}') -> SimpleNam
 @pytest.mark.asyncio
 async def test_openai_adapter_uses_configured_endpoint_and_model() -> None:
     provider = OpenAICompatibleProvider(
-        base_url="https://example.test/v1", api_key="test-secret", model="demo-model"
+        base_url="https://example.test/v1", api_key="test-secret", model="test-model"
     )
     provider.client.chat.completions.create = AsyncMock(return_value=make_response())
 
     turn = await provider.complete(MESSAGES, TOOLS)
 
     call = provider.client.chat.completions.create.call_args
-    assert call.kwargs["model"] == "demo-model"
+    assert call.kwargs["model"] == "test-model"
     assert provider.client.base_url.host == "example.test"
     assert turn.tool_calls[0].arguments == {"service": "payments-api"}
 
 
 @pytest.mark.asyncio
 async def test_openai_adapter_rejects_malformed_tool_arguments() -> None:
-    provider = OpenAICompatibleProvider("https://example.test/v1", "test-secret", "demo-model")
+    provider = OpenAICompatibleProvider("https://example.test/v1", "test-secret", "test-model")
     provider.client.chat.completions.create = AsyncMock(return_value=make_response(arguments="{"))
 
     with pytest.raises(ModelProtocolError, match="tool arguments"):
@@ -56,7 +56,7 @@ async def test_openai_adapter_rejects_malformed_tool_arguments() -> None:
 
 @pytest.mark.asyncio
 async def test_openai_adapter_hides_api_key_from_provider_errors() -> None:
-    provider = OpenAICompatibleProvider("https://example.test/v1", "test-secret", "demo-model")
+    provider = OpenAICompatibleProvider("https://example.test/v1", "test-secret", "test-model")
     provider.client.chat.completions.create = AsyncMock(
         side_effect=RuntimeError("test-secret leaked")
     )

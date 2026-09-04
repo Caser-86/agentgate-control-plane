@@ -2,9 +2,8 @@
 
 from collections.abc import Sequence
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision: str = "0010_file_action_governance"
 down_revision: str | Sequence[str] | None = "0009_monitoring_mvp"
@@ -26,7 +25,9 @@ def upgrade() -> None:
     op.add_column("tool_actions", sa.Column("target_type", sa.String(length=64), nullable=True))
     op.add_column("tool_actions", sa.Column("target_id", sa.UUID(), nullable=True))
     op.add_column("tool_actions", sa.Column("action_version", sa.String(length=64), nullable=True))
-    op.add_column("tool_actions", sa.Column("arguments_digest", sa.String(length=64), nullable=True))
+    op.add_column(
+        "tool_actions", sa.Column("arguments_digest", sa.String(length=64), nullable=True)
+    )
     op.add_column("tool_actions", sa.Column("policy_version", sa.String(length=64), nullable=True))
     op.add_column(
         "tool_actions",

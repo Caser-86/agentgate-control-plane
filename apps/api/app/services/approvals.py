@@ -34,7 +34,7 @@ class ApprovalDecision(StrEnum):
     DENIED = "denied"
 
 
-POLICY_VERSION = "local-demo-v1"
+POLICY_VERSION = "local-policy-v1"
 CONTROL_RUN_CAPABILITY = "control.run"
 
 

@@ -40,7 +40,7 @@ vi.mock("../api/actions", () => ({
 describe("FileGovernancePage", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("submits an explicitly selected file action without demo copy", async () => {
+  it("submits an explicitly selected file action without legacy copy", async () => {
     const user = userEvent.setup();
     render(<MemoryRouter><FileGovernancePage /></MemoryRouter>);
 

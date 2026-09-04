@@ -6,7 +6,7 @@ from uuid import uuid4
 import pytest
 from sqlmodel import Session
 
-from app.db import create_db_and_tables, create_db_engine, seed_demo_state
+from app.db import create_db_and_tables, create_db_engine, seed_example_state
 from app.models import ActionStatus, AgentRun, PolicyDecision, RiskLevel, ServiceState, ToolAction
 from app.repositories import AuditRepository, RunRepository
 from app.services.executor import ExecutionNotAllowedError, ToolExecutor
@@ -19,7 +19,7 @@ def session() -> Session:
     engine = create_db_engine("sqlite://")
     create_db_and_tables(engine)
     with Session(engine) as db_session:
-        seed_demo_state(db_session)
+        seed_example_state(db_session)
         yield db_session
 
 
@@ -178,7 +178,7 @@ async def test_concurrent_execution_claims_action_once(tmp_path) -> None:
     engine = create_db_engine(f"sqlite:///{tmp_path / 'concurrent.db'}")
     create_db_and_tables(engine)
     with Session(engine) as setup_session:
-        seed_demo_state(setup_session)
+        seed_example_state(setup_session)
         run = RunRepository(setup_session).create("Restart payments", "mock", "mock")
         run_id = run.id
         action = add_action(

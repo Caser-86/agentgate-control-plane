@@ -66,12 +66,12 @@ function Assert-DemoDirectory {
     $localAppData = [System.IO.Path]::GetFullPath($env:LOCALAPPDATA).TrimEnd("\")
     $requiredPrefix = "$localAppData\AgentGate\demo-workspace"
     if (-not $resolved.Equals($requiredPrefix, [StringComparison]::OrdinalIgnoreCase)) {
-        throw "拒绝使用非演示目录：$resolved"
+        throw "拒绝使用非受管目录：$resolved"
     }
     if (Test-Path -LiteralPath $resolved) {
         $item = Get-Item -LiteralPath $resolved -Force
         if (-not (Test-ReparsePoint $item)) { return $resolved }
-        throw "演示目录不能是符号链接或其他重解析点：$resolved"
+        throw "受管目录不能是符号链接或其他重解析点：$resolved"
     }
     return $resolved
 }
@@ -227,11 +227,11 @@ if ($ResetDemoData) {
     Remove-DemoFile (Join-Path $demoRoot "demo-secret.txt")
 }
 Ensure-DemoFile (Join-Path $demoRoot "demo.txt") "AgentGate 文件治理测试文件。内容由脚本生成，不包含真实凭据。"
-Ensure-DemoFile (Join-Path $demoRoot "demo-secret.txt") ("演示专用占位内容：" + [Guid]::NewGuid().ToString("N"))
+Ensure-DemoFile (Join-Path $demoRoot "demo-secret.txt") ("文件治理测试占位内容：" + [Guid]::NewGuid().ToString("N"))
 
 Write-Host "文件治理数据已准备完成。"
 Write-Host "API：$apiBase"
 Write-Host "Worker：在线"
-Write-Host "演示工作区：$demoRoot"
+Write-Host "文件治理工作区：$demoRoot"
 Write-Host "下一步：打开 $webUrl，选择工作区和文件动作。"
 if (-not $NoBrowser) { Start-Process $webUrl | Out-Null }

@@ -5,7 +5,6 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-
 revision: str = "0007_bound_grants_check_owner"
 down_revision: str | Sequence[str] | None = "0006_control_task_lease_version"
 branch_labels: str | Sequence[str] | None = None
@@ -22,29 +21,37 @@ def upgrade() -> None:
         with op.batch_alter_table("control_tasks") as batch:
             batch.add_column(sa.Column("proposer_client_id", sa.UUID(), nullable=True))
             batch.create_foreign_key(
-                "fk_control_tasks_proposer_client_id", "client_tokens",
-                ["proposer_client_id"], ["id"],
+                "fk_control_tasks_proposer_client_id",
+                "client_tokens",
+                ["proposer_client_id"],
+                ["id"],
             )
             batch.drop_constraint("uq_control_tasks_idempotency_key", type_="unique")
     else:
         op.add_column("control_tasks", sa.Column("proposer_client_id", sa.UUID(), nullable=True))
         op.create_foreign_key(
-            "fk_control_tasks_proposer_client_id", "control_tasks", "client_tokens",
-            ["proposer_client_id"], ["id"],
+            "fk_control_tasks_proposer_client_id",
+            "control_tasks",
+            "client_tokens",
+            ["proposer_client_id"],
+            ["id"],
         )
         op.drop_constraint("uq_control_tasks_idempotency_key", "control_tasks", type_="unique")
+    op.create_index("ix_control_tasks_proposer_client_id", "control_tasks", ["proposer_client_id"])
     op.create_index(
-        "ix_control_tasks_proposer_client_id", "control_tasks", ["proposer_client_id"]
-    )
-    op.create_index(
-        "uq_control_tasks_proposer_idempotency", "control_tasks",
-        ["proposer_client_id", "idempotency_key"], unique=True,
+        "uq_control_tasks_proposer_idempotency",
+        "control_tasks",
+        ["proposer_client_id", "idempotency_key"],
+        unique=True,
         postgresql_where=sa.text("proposer_client_id IS NOT NULL"),
         sqlite_where=sa.text("proposer_client_id IS NOT NULL"),
     )
     op.create_index(
-        "uq_control_tasks_internal_idempotency", "control_tasks", ["idempotency_key"],
-        unique=True, postgresql_where=sa.text("proposer_client_id IS NULL"),
+        "uq_control_tasks_internal_idempotency",
+        "control_tasks",
+        ["idempotency_key"],
+        unique=True,
+        postgresql_where=sa.text("proposer_client_id IS NULL"),
         sqlite_where=sa.text("proposer_client_id IS NULL"),
     )
 

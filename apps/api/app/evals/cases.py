@@ -88,7 +88,7 @@ EVAL_CASES: tuple[EvalCase, ...] = (
     ),
     EvalCase(
         name="malformed_arguments_never_execute",
-        user_request="Run the malformed arguments demo against payments-api.",
+        user_request="Send malformed arguments to payments-api.",
         approval=None,
         expected_status=RunStatus.COMPLETED,
         required_tools=("get_service_health",),

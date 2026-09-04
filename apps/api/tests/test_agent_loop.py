@@ -3,7 +3,7 @@ import json
 import pytest
 from sqlmodel import Session
 
-from app.db import create_db_and_tables, create_db_engine, seed_demo_state
+from app.db import create_db_and_tables, create_db_engine, seed_example_state
 from app.llm.base import ModelTurn, ToolCall
 from app.llm.mock import MockLLMProvider
 from app.models import ActionStatus, AgentRun, RunStatus, ServiceState
@@ -16,7 +16,7 @@ def session() -> Session:
     engine = create_db_engine("sqlite://")
     create_db_and_tables(engine)
     with Session(engine) as db_session:
-        seed_demo_state(db_session)
+        seed_example_state(db_session)
         yield db_session
 
 
@@ -97,6 +97,23 @@ class InfiniteHealthProvider:
         return ModelTurn(
             {"role": "assistant", "content": None, "tool_calls": []}, None, (call,)
         )
+
+
+class CloseTrackingProvider(MockLLMProvider):
+    def __init__(self) -> None:
+        self.closed = False
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+@pytest.mark.asyncio
+async def test_runner_closes_provider_when_run_finishes(session: Session) -> None:
+    provider = CloseTrackingProvider()
+
+    await make_runner(session, provider).start_run("Inspect orders-api")
+
+    assert provider.closed is True
 
 
 @pytest.mark.asyncio

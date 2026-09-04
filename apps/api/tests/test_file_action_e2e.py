@@ -15,14 +15,14 @@ def test_external_agent_approval_worker_and_status_form_one_closed_loop(
     client, engine, token_file = auth_client
     authenticate_client(client, token_file)
     allowed_root = tmp_path / "allowed"
-    workspace_root = allowed_root / "interview-demo"
+    workspace_root = allowed_root / "file-action-e2e"
     workspace_root.mkdir(parents=True)
     (workspace_root / "demo.txt").write_bytes(b"demo")
     monkeypatch.setattr(get_settings(), "workspace_allowed_root", str(allowed_root))
 
     workspace_response = client.post(
         "/api/v1/workspaces",
-        json={"name": "面试安全演示", "root_path": str(workspace_root)},
+        json={"name": "文件治理测试工作区", "root_path": str(workspace_root)},
     )
     assert workspace_response.status_code == 201
     workspace_id = workspace_response.json()["id"]

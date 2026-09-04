@@ -5,7 +5,6 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-
 revision: str = "0012_partial_action_idempotency"
 down_revision: str | Sequence[str] | None = "0011_scoped_action_idempotency"
 branch_labels: str | Sequence[str] | None = None
@@ -13,9 +12,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.drop_constraint(
-        "uq_tool_actions_client_idempotency", "tool_actions", type_="unique"
-    )
+    op.drop_constraint("uq_tool_actions_client_idempotency", "tool_actions", type_="unique")
     op.create_index(
         "uq_tool_actions_legacy_idempotency",
         "tool_actions",

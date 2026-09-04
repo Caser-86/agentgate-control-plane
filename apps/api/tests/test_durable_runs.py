@@ -7,7 +7,7 @@ from app.auth.dependencies import ClientIdentity
 from app.config import Settings
 from app.control.enums import TaskKind, TaskStatus
 from app.control.models import ControlTask, OutboxEvent
-from app.db import create_db_and_tables, create_db_engine, seed_demo_state
+from app.db import create_db_and_tables, create_db_engine, seed_example_state
 from app.models import AgentRun
 from app.services.runs import RunService
 from tests.conftest import authenticate_client
@@ -29,7 +29,7 @@ def test_create_run_returns_queued_and_enqueues_one_resume_task(
 ) -> None:
     client, engine, token_file = auth_client
     with Session(engine) as session:
-        seed_demo_state(session)
+        seed_example_state(session)
     authenticate_client(client, token_file)
 
     response = client.post("/api/runs", json={"user_request": "inspect service health"})
@@ -50,7 +50,7 @@ def test_create_run_persists_initial_audit_and_sse_event_with_queued_task(
 ) -> None:
     client, engine, token_file = auth_client
     with Session(engine) as session:
-        seed_demo_state(session)
+        seed_example_state(session)
     authenticate_client(client, token_file)
 
     response = client.post("/api/runs", json={"user_request": "inspect service health"})
@@ -78,7 +78,7 @@ def test_create_run_does_not_use_fastapi_background_tasks(
 
     client, engine, token_file = auth_client
     with Session(engine) as session:
-        seed_demo_state(session)
+        seed_example_state(session)
     authenticate_client(client, token_file)
 
     def background_task_is_forbidden(*_: object, **__: object) -> None:

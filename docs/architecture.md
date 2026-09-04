@@ -117,7 +117,7 @@ sequenceDiagram
 - **直接使用 OpenAI SDK：**适配器使用官方 Python 客户端调用 OpenAI-compatible Chat Completions，但对 Agent 循环只暴露与提供方无关的 `ModelTurn` 和 `ToolCall` 类型。
 - **单 Agent：**单一 Runner 让 MVP 的审批语义、工具调用顺序和检查点恢复保持明确。后续可以在同一个策略/执行器边界之后增加专用 Agent。
 
-## 本地演示限制与生产演进路径
+## 本地运行限制与生产演进路径
 
 当前版本仍刻意限制为本地运行：Compose 将 Web/API 绑定到回环地址，PostgreSQL 不发布宿主机端口。scheduler 负责恢复持久化租约并为到期监控目标排队，control-worker 处理持久化控制任务；原生 Windows Worker 处理 `platform.self_check`、本机 HTTP、Windows 服务只读探针，以及受管工作区内的文件检查、隔离和恢复。监控只允许回环 HTTP 地址和安全格式的服务名，不保存响应正文，也不执行任意 Shell/PowerShell。文件动作只接受相对路径，保护规则直接拒绝，恢复不覆盖目标冲突；真实 Windows 服务重启和密钥操作仍未实现。
 

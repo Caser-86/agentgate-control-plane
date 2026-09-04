@@ -12,7 +12,7 @@ from app.auth.security import digest_secret
 from app.control.enums import TaskKind, TaskStatus
 from app.control.models import ControlTask, WorkerExecutionGrant, WorkerRegistration
 from app.control.repositories import enqueue_task
-from app.db import create_db_and_tables, create_db_engine, seed_demo_state
+from app.db import create_db_and_tables, create_db_engine, seed_example_state
 from app.llm.base import ModelTurn, ToolCall
 from app.models import ActionStatus, PolicyDecision, RiskLevel, ToolAction
 from app.repositories import ActionRepository, AuditRepository, RunRepository
@@ -69,7 +69,7 @@ async def test_arbitrary_shell_payload_is_denied_without_side_effect_and_audited
 
     engine = _new_engine()
     with Session(engine) as session:
-        seed_demo_state(session)
+        seed_example_state(session)
         run_id = await AgentRunner(
             session, provider=ShellPayloadProvider(), run_timeout_seconds=5
         ).start_run("investigate without shell")
@@ -245,7 +245,7 @@ def test_unscoped_client_token_cannot_approve_pending_action(
 ) -> None:
     client, engine, token_file = auth_client
     with Session(engine) as session:
-        seed_demo_state(session)
+        seed_example_state(session)
         action = _pending_action(session)
         session.add(
             ClientToken(

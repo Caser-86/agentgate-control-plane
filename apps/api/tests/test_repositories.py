@@ -5,7 +5,7 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session
 
-from app.db import create_db_and_tables, create_db_engine, seed_demo_state
+from app.db import create_db_and_tables, create_db_engine, seed_example_state
 from app.models import (
     ActionStatus,
     AuditEvent,
@@ -23,7 +23,7 @@ def session() -> Session:
     engine = create_db_engine("sqlite://")
     create_db_and_tables(engine)
     with Session(engine) as db_session:
-        seed_demo_state(db_session)
+        seed_example_state(db_session)
         yield db_session
 
 

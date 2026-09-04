@@ -10,6 +10,10 @@
 - [x] 本地文件治理准备脚本、Worker 启动、Task Scheduler 契约和完整 `scripts/verify.ps1 -IncludeWindowsFileContract` 均通过；脚本不覆盖 `.env`，不打印令牌，只操作明确的本地工作区。
 - [x] 60 分钟文件动作稳定性测试已完成：`107/107` 成功、失败 `0`；日志为 `data/file-action-soak-20260904-150811.log`，标准输出为 `data/file-action-soak-60m.stdout.log`。
 - [ ] 24 小时 Windows `EventLog` 监控稳定性测试已重新启动，进程 PID `3388`；当前独立日志为 `data/worker-soak-eventlog-24h-restarted.log`。此前日志在第 `730` 次采样后没有 `END` 标记，不能计入完成结果。
+- [x] 本轮代码与文案审查已完成：生产文案移除过时的“local demo”描述，配置字段改为 `seed_example` 并兼容旧环境变量，OpenAI-compatible 客户端在运行结束时主动关闭；API `257 passed, 6 skipped`，Web `48 passed`，浏览器 E2E `3 passed`。
+- [x] 已清理可重建的前端构建物、测试报告、Python 缓存、评测结果和明确失败的旧短时日志；`.env`、数据库、Worker 状态、已通过证据和 24 小时测试日志均保留。
+
+以下内容为历史实施记录，仅用于追溯当时的环境、证据和限制；当前结论以上方“文件动作治理交付验收”为准。
 
 # 本机服务登记与稳定性测试 — 2026-09-04
 

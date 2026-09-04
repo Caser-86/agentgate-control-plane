@@ -9,7 +9,7 @@ class PolicyEngine:
             return PolicyResult(
                 PolicyDecision.DENY,
                 tool.risk_level,
-                "High-risk actions are denied by the local demo policy.",
+                "High-risk actions are denied by the local policy.",
             )
         if tool.risk_level is RiskLevel.MEDIUM:
             return PolicyResult(

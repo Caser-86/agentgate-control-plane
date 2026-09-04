@@ -18,7 +18,7 @@ def engine() -> Engine:
 def test_workspace_version_and_quarantine_status_are_persistable(engine: Engine) -> None:
     workspace = ManagedWorkspace(
         id=uuid4(),
-        name="演示工作区",
+        name="测试工作区",
         root_path=r"D:\demo",
         canonical_root_path=r"D:\demo",
         quarantine_root_path=r"D:\demo-quarantine",

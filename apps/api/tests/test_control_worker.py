@@ -8,7 +8,7 @@ from sqlmodel import Session, select
 from app.control.enums import SideEffectCertainty, TaskKind, TaskStatus
 from app.control.models import ControlTask, OutboxEvent
 from app.control.repositories import claim_next_task, enqueue_task
-from app.db import create_db_and_tables, create_db_engine, seed_demo_state
+from app.db import create_db_and_tables, create_db_engine, seed_example_state
 from app.llm.base import ModelTurn
 from app.models import (
     ActionStatus,
@@ -31,7 +31,7 @@ def test_worker_recovers_queued_run_after_api_process_exits(
 ) -> None:
     client, engine, token_file = auth_client
     with Session(engine) as session:
-        seed_demo_state(session)
+        seed_example_state(session)
     authenticate_client(client, token_file)
     response = client.post("/api/runs", json={"user_request": "inspect orders-api health"})
     run_id = UUID(response.json()["id"])

@@ -89,6 +89,10 @@ class AgentRunner:
             raise
         except Exception:
             self._fail_run(run_id, "run failed safely")
+        finally:
+            close = getattr(self.provider, "aclose", None)
+            if callable(close):
+                await close()
 
     async def _run(self, run_id: UUID) -> None:
         run = self.run_repository.get(run_id)

@@ -7,7 +7,7 @@ from sqlmodel import Session, select
 
 from app.control.enums import SideEffectCertainty, TaskKind, TaskStatus
 from app.control.models import ControlTask, OutboxEvent
-from app.db import seed_demo_state
+from app.db import seed_example_state
 from app.models import ActionStatus, AgentRun, PolicyDecision, RiskLevel, RunStatus, ToolAction
 from app.services.executor import ToolExecutor
 from tests.conftest import authenticate_client
@@ -47,7 +47,7 @@ def test_approval_does_not_execute_inside_http_request(
 ) -> None:
     client, engine, token_file = auth_client
     with Session(engine) as session:
-        seed_demo_state(session)
+        seed_example_state(session)
         action = _waiting_action(session)
     authenticate_client(client, token_file)
     execute = AsyncMock()
@@ -70,7 +70,7 @@ def test_duplicate_approval_conflicts_without_second_resume_task(
 ) -> None:
     client, engine, token_file = auth_client
     with Session(engine) as session:
-        seed_demo_state(session)
+        seed_example_state(session)
         action = _waiting_action(session)
     authenticate_client(client, token_file)
     monkeypatch.setattr(ToolExecutor, "execute", AsyncMock())

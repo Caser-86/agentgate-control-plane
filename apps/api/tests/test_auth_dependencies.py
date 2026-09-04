@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session
 
 from app.config import get_settings
-from app.db import create_db_and_tables, create_db_engine, get_session, seed_demo_state
+from app.db import create_db_and_tables, create_db_engine, get_session, seed_example_state
 from app.main import app
 
 
@@ -15,7 +15,7 @@ def test_existing_browser_route_rejects_an_unauthenticated_request() -> None:
     engine = create_db_engine("sqlite://")
     create_db_and_tables(engine)
     with Session(engine) as session:
-        seed_demo_state(session)
+        seed_example_state(session)
 
     def override_session() -> Generator[Session, None, None]:
         with Session(engine) as session:

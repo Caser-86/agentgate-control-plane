@@ -101,7 +101,7 @@ async def test_approval_creates_one_file_task_and_success_projects_entry(
             action="file.quarantine.v1",
             workspace_id=workspace.id,
             relative_path="demo.txt",
-            reason="面试演示",
+            reason="文件治理测试",
         ),
         "lifecycle-quarantine-1",
     )

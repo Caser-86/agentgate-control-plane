@@ -1,1 +1,1 @@
-"""Deterministic acceptance evaluations for the local AgentGate demo."""
+"""Deterministic acceptance evaluations for the local AgentGate control plane."""

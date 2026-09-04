@@ -71,7 +71,7 @@ AgentGate 是一个面向本机运行的 AI Agent 操作治理平台。它把 Ag
 - `mock` 提供方不是具备真实推理能力的生产模型。
 - 外部 Agent 的 `/api/v1/actions` 对文件动作会进入统一策略、审批和 Native Worker 队列；通用业务工具仍可只做策略预检。
 
-当前演示里的 `payments-api` 和 `orders-api` 是数据库中的服务状态记录。调用 `restart_service` 只会把演示服务状态改为 `healthy` 并增加 `restart_count`，不会操作操作系统中的同名服务。
+当前示例中的 `payments-api` 和 `orders-api` 是数据库中的服务状态记录。调用 `restart_service` 只会把示例服务状态改为 `healthy` 并增加 `restart_count`，不会操作操作系统中的同名服务。
 
 ## 三、核心工作流程
 
@@ -139,7 +139,7 @@ flowchart TD
 
 ### 4.3 受管文件动作
 
-文件动作是本项目目前最适合面试展示的真实闭环：外部 Agent 只能提交相对路径，策略先拒绝 `.env` 等保护规则；普通文件必须经过管理员批准，再由 Windows Native Worker 在受管工作区内隔离，最后可以恢复。每一步都保存动作状态、文件 SHA-256 摘要、审批和审计游标。
+文件动作是本项目目前最完整的真实闭环：外部 Agent 只能提交相对路径，策略先拒绝 `.env` 等保护规则；普通文件必须经过管理员批准，再由 Windows Native Worker 在受管工作区内隔离，最后可以恢复。每一步都保存动作状态、文件 SHA-256 摘要、审批和审计游标。
 
 | 动作 | 默认决定 | 实际效果 |
 | --- | --- | --- |
@@ -292,7 +292,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\migrate-local.
 
 ### 6.6 一键本地准备（可选）
 
-如果你希望快速准备一个受管工作区和真实文件动作的验收环境，在项目根目录执行：
+如果你希望快速准备一个受管工作区和真实文件动作的本地环境，在项目根目录执行：
 
 ```powershell
 Set-Location 'D:\LLM Files\files\agentgate-control-plane'
@@ -307,7 +307,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\demo.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\demo.ps1 -ApiPort 18230 -WebPort 15173
 ```
 
-`-ResetDemoData` 只会删除演示工作区中脚本生成的 `demo.txt` 和 `demo-secret.txt`，不会删除数据库、审计记录或其他目录；`-NoBrowser` 适合自动化验收。
+`-ResetDemoData` 是兼容现有脚本调用的参数，只会删除文件治理工作区中脚本生成的 `demo.txt` 和 `demo-secret.txt`，不会删除数据库、审计记录或其他目录；`-NoBrowser` 适合自动化验收。
 
 迁移由 Alembic 执行，生产代码不会用 `create_all()` 偷偷创建或覆盖数据库结构。
 
@@ -360,7 +360,7 @@ bootstrap token 是一次性、短时有效的初始化凭据。初始化完成�
 
 ## 八、完成第一次功能验收
 
-### 8.0 文件治理流程（面试可选）
+### 8.0 文件治理流程
 
 完成上一节的本地准备后，按以下顺序操作：
 
@@ -545,7 +545,7 @@ Invoke-RestMethod `
 ```powershell
 $headers = @{
     Authorization = "Bearer ***"
-    "Idempotency-Key" = "interview-demo-001"
+    "Idempotency-Key" = "file-governance-001"
 }
 $body = @{
     action = "file.quarantine.v1"
@@ -889,7 +889,7 @@ agentgate-control-plane/
 │  └─ worker/               Windows 原生 Worker 协议实现和测试
 ├─ docs/
 │  ├─ architecture.md      架构、状态机、审批顺序和事务边界
-│  ├─ demo.md               本地演示脚本
+│  ├─ demo.md               本地功能验收手册
 │  ├─ assets/               截图和文档资源
 │  └─ superpowers/          规格、计划、报告和进度记录
 ├─ scripts/

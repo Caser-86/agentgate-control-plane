@@ -36,7 +36,7 @@ def test_workspace_update_increments_version_and_disable_blocks_actions(
     root.mkdir(parents=True)
     monkeypatch.setattr(get_settings(), "workspace_allowed_root", str(allowed))
     created = client.post(
-        "/api/v1/workspaces", json={"name": "演示工作区", "root_path": str(root)}
+        "/api/v1/workspaces", json={"name": "测试工作区", "root_path": str(root)}
     )
     assert created.status_code == 201
 
@@ -59,7 +59,7 @@ def test_workspace_quarantine_endpoint_never_returns_absolute_paths(
     root.mkdir(parents=True)
     monkeypatch.setattr(get_settings(), "workspace_allowed_root", str(allowed))
     created = client.post(
-        "/api/v1/workspaces", json={"name": "演示工作区", "root_path": str(root)}
+        "/api/v1/workspaces", json={"name": "测试工作区", "root_path": str(root)}
     )
     workspace_id = created.json()["id"]
 

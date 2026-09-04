@@ -13,6 +13,9 @@ class OpenAICompatibleProvider:
         self.client = AsyncOpenAI(base_url=base_url, api_key=api_key)
         self.model = model
 
+    async def aclose(self) -> None:
+        await self.client.close()
+
     async def complete(
         self,
         messages: list[dict[str, object]],

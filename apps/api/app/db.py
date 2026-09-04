@@ -68,7 +68,7 @@ def get_session() -> Generator[Session, None, None]:
         yield session
 
 
-def seed_demo_state(session: Session) -> None:
+def seed_example_state(session: Session) -> None:
     defaults = (
         ServiceState(service="payments-api", health="degraded", restart_count=0),
         ServiceState(service="orders-api", health="healthy", restart_count=0),

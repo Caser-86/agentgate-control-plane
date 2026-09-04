@@ -7,9 +7,8 @@ Create Date: 2026-08-31
 
 from collections.abc import Sequence
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision: str = "0003_auth_tables"
 down_revision: str | Sequence[str] | None = "0002_control_plane_tables"

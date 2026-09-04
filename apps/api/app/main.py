@@ -27,7 +27,7 @@ from app.db import (
     database_schema_is_ready,
     get_engine,
     reset_db_and_tables,
-    seed_demo_state,
+    seed_example_state,
 )
 
 settings = get_settings()
@@ -48,12 +48,12 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
                 Path(settings.worker_ready_file).unlink(missing_ok=True)
             with Session(engine) as session:
-                seed_demo_state(session)
+                seed_example_state(session)
         else:
             create_db_and_tables(engine)
-    if settings.environment == "development" and settings.seed_demo:
+    if settings.environment == "development" and settings.seed_example:
         with Session(engine) as session:
-            seed_demo_state(session)
+            seed_example_state(session)
     if settings.auth_enabled and (not is_sqlite_test_engine or settings.environment == "test"):
         with Session(engine) as session:
             ensure_bootstrap_token(session, settings)

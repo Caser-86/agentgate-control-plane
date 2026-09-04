@@ -18,7 +18,7 @@ def session(tmp_path: Path) -> Generator[Session, None, None]:
     with Session(engine) as database_session:
         workspace = ManagedWorkspace(
             id=uuid4(),
-            name="演示工作区",
+        name="测试工作区",
             root_path=str(tmp_path),
             canonical_root_path=str(tmp_path),
             quarantine_root_path=str(tmp_path.parent / "quarantine"),

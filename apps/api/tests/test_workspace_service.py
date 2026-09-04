@@ -25,7 +25,7 @@ def test_create_workspace_derives_external_quarantine_root(
     root = tmp_path / "project"
     root.mkdir()
 
-    workspace = WorkspaceService(session).create("演示工作区", str(root), None)
+    workspace = WorkspaceService(session).create("测试工作区", str(root), None)
 
     assert workspace.version == 1
     assert workspace.enabled is True
@@ -51,7 +51,7 @@ def test_update_workspace_increments_version_and_disable_is_persisted(
     monkeypatch.setattr(get_settings(), "workspace_allowed_root", str(tmp_path))
     root = tmp_path / "project"
     root.mkdir()
-    workspace = WorkspaceService(session).create("演示工作区", str(root), None)
+    workspace = WorkspaceService(session).create("测试工作区", str(root), None)
 
     updated = WorkspaceService(session).update(
         workspace.id, WorkspacePatch(enabled=False, name="已停用工作区")

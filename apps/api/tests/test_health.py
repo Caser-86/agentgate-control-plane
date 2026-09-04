@@ -34,14 +34,14 @@ def test_meta_returns_provider_without_secret_material(
     assert "api_key" not in response.text
 
 
-def test_development_startup_seeds_demo_service_state(monkeypatch) -> None:
+def test_development_startup_seeds_example_service_state(monkeypatch) -> None:
     engine = create_db_engine("sqlite://")
     create_db_and_tables(engine)
     monkeypatch.setattr(main, "get_engine", lambda: engine)
     monkeypatch.setattr(
         main,
         "settings",
-        Settings.model_construct(environment="development", seed_demo=True),
+        Settings.model_construct(environment="development", seed_example=True),
     )
 
     with TestClient(app):
@@ -52,14 +52,14 @@ def test_development_startup_seeds_demo_service_state(monkeypatch) -> None:
     assert payments.health == "degraded"
 
 
-def test_production_startup_does_not_seed_demo_service_state(monkeypatch) -> None:
+def test_production_startup_does_not_seed_example_service_state(monkeypatch) -> None:
     engine = create_db_engine("sqlite://")
     create_db_and_tables(engine)
     monkeypatch.setattr(main, "get_engine", lambda: engine)
     monkeypatch.setattr(
         main,
         "settings",
-        Settings.model_construct(environment="production", seed_demo=False),
+        Settings.model_construct(environment="production", seed_example=False),
     )
 
     with TestClient(app):
@@ -83,7 +83,7 @@ def test_disabled_auth_startup_does_not_issue_a_bootstrap_token(
             environment="development",
             auth_enabled=False,
             database_migration_required=False,
-            seed_demo=False,
+            seed_example=False,
             auth_bootstrap_token_file=str(bootstrap_file),
         ),
     )

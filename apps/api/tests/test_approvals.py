@@ -5,7 +5,7 @@ import pytest
 from sqlmodel import Session, select
 
 from app.control.models import OutboxEvent
-from app.db import create_db_and_tables, create_db_engine, seed_demo_state
+from app.db import create_db_and_tables, create_db_engine, seed_example_state
 from app.llm.mock import MockLLMProvider
 from app.models import ActionStatus, AgentRun, RunStatus, ServiceState
 from app.processes.control_worker import ControlWorker
@@ -19,7 +19,7 @@ def session() -> Session:
     engine = create_db_engine("sqlite://")
     create_db_and_tables(engine)
     with Session(engine) as db_session:
-        seed_demo_state(db_session)
+        seed_example_state(db_session)
         yield db_session
 
 

@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session
 
 from app.control.repositories import append_outbox_event
-from app.db import seed_demo_state
+from app.db import seed_example_state
 from app.models import ActionStatus, PolicyDecision, RiskLevel, ToolAction
 from app.repositories import RunRepository
 from app.services.executor import ToolExecutor
@@ -102,7 +102,7 @@ def test_http_sse_stream_has_durable_event_headers(
 ) -> None:
     client, engine, token_file = auth_client
     with Session(engine) as session:
-        seed_demo_state(session)
+        seed_example_state(session)
         run = RunRepository(session).create("Inspect payments-api", "mock", "mock")
         run_id = run.id
 
@@ -128,7 +128,7 @@ def test_http_run_stream_replays_approved_action_events_from_database(
     client, engine, token_file = auth_client
 
     with Session(engine) as session:
-        seed_demo_state(session)
+        seed_example_state(session)
         run = RunRepository(session).create("Inspect payments", "mock", "mock")
         action = ToolAction(
             run_id=run.id,

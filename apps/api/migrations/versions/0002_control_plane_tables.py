@@ -7,9 +7,8 @@ Create Date: 2026-08-31
 
 from collections.abc import Sequence
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision: str = "0002_control_plane_tables"
 down_revision: str | Sequence[str] | None = "0001_legacy_schema"
@@ -49,8 +48,10 @@ def upgrade() -> None:
         sa.UniqueConstraint("idempotency_key", name="uq_control_tasks_idempotency_key"),
     )
     for name, columns in {
-        "ix_control_tasks_kind": ["kind"], "ix_control_tasks_status": ["status"],
-        "ix_control_tasks_capability": ["capability"], "ix_control_tasks_run_id": ["run_id"],
+        "ix_control_tasks_kind": ["kind"],
+        "ix_control_tasks_status": ["status"],
+        "ix_control_tasks_capability": ["capability"],
+        "ix_control_tasks_run_id": ["run_id"],
         "ix_control_tasks_available_at": ["available_at"],
         "ix_control_tasks_lease_owner_id": ["lease_owner_id"],
         "ix_control_tasks_lease_expires_at": ["lease_expires_at"],
@@ -60,16 +61,21 @@ def upgrade() -> None:
 
     op.create_table(
         "worker_registrations",
-        sa.Column("id", sa.UUID(), nullable=False), sa.Column("name", sa.String(), nullable=False),
-        sa.Column("version", sa.String(), nullable=False), sa.Column("capabilities", sa.JSON(), nullable=False),
-        sa.Column("token_digest", sa.String(), nullable=False), sa.Column("status", sa.String(32), nullable=False),
+        sa.Column("id", sa.UUID(), nullable=False),
+        sa.Column("name", sa.String(), nullable=False),
+        sa.Column("version", sa.String(), nullable=False),
+        sa.Column("capabilities", sa.JSON(), nullable=False),
+        sa.Column("token_digest", sa.String(), nullable=False),
+        sa.Column("status", sa.String(32), nullable=False),
         sa.Column("last_heartbeat_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
-        sa.PrimaryKeyConstraint("id"), sa.UniqueConstraint("token_digest", name="uq_worker_token_digest"),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint("token_digest", name="uq_worker_token_digest"),
     )
     for name, columns in {
-        "ix_worker_registrations_name": ["name"], "ix_worker_registrations_token_digest": ["token_digest"],
+        "ix_worker_registrations_name": ["name"],
+        "ix_worker_registrations_token_digest": ["token_digest"],
         "ix_worker_registrations_status": ["status"],
         "ix_worker_registrations_last_heartbeat_at": ["last_heartbeat_at"],
         "ix_worker_registrations_created_at": ["created_at"],
@@ -79,15 +85,19 @@ def upgrade() -> None:
     op.create_table(
         "outbox_events",
         sa.Column("sequence", sa.BigInteger(), sa.Identity(), nullable=False),
-        sa.Column("event_type", sa.String(), nullable=False), sa.Column("resource_type", sa.String(), nullable=False),
-        sa.Column("resource_id", sa.UUID(), nullable=False), sa.Column("payload", sa.JSON(), nullable=False),
+        sa.Column("event_type", sa.String(), nullable=False),
+        sa.Column("resource_type", sa.String(), nullable=False),
+        sa.Column("resource_id", sa.UUID(), nullable=False),
+        sa.Column("payload", sa.JSON(), nullable=False),
         sa.Column("published_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.PrimaryKeyConstraint("sequence"),
     )
     for name, columns in {
-        "ix_outbox_events_event_type": ["event_type"], "ix_outbox_events_resource_type": ["resource_type"],
-        "ix_outbox_events_resource_id": ["resource_id"], "ix_outbox_events_published_at": ["published_at"],
+        "ix_outbox_events_event_type": ["event_type"],
+        "ix_outbox_events_resource_type": ["resource_type"],
+        "ix_outbox_events_resource_id": ["resource_id"],
+        "ix_outbox_events_published_at": ["published_at"],
         "ix_outbox_events_created_at": ["created_at"],
     }.items():
         op.create_index(name, "outbox_events", columns)

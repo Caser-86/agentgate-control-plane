@@ -7,9 +7,8 @@ Create Date: 2026-08-31
 
 from collections.abc import Sequence
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision: str = "0001_legacy_schema"
 down_revision: str | Sequence[str] | None = None
@@ -19,11 +18,25 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     run_status = sa.Enum(
-        "QUEUED", "RUNNING", "WAITING_APPROVAL", "COMPLETED", "FAILED", "CANCELLED", name="runstatus"
+        "QUEUED",
+        "RUNNING",
+        "WAITING_APPROVAL",
+        "COMPLETED",
+        "FAILED",
+        "CANCELLED",
+        name="runstatus",
     )
     action_status = sa.Enum(
-        "PROPOSED", "AUTO_APPROVED", "PENDING_APPROVAL", "APPROVED", "DENIED", "RUNNING",
-        "SUCCEEDED", "FAILED", "EXPIRED", name="actionstatus"
+        "PROPOSED",
+        "AUTO_APPROVED",
+        "PENDING_APPROVAL",
+        "APPROVED",
+        "DENIED",
+        "RUNNING",
+        "SUCCEEDED",
+        "FAILED",
+        "EXPIRED",
+        name="actionstatus",
     )
     risk_level = sa.Enum("LOW", "MEDIUM", "HIGH", name="risklevel")
     policy_decision = sa.Enum("AUTO_APPROVE", "REQUIRE_APPROVAL", "DENY", name="policydecision")
@@ -88,7 +101,9 @@ def upgrade() -> None:
     )
     op.create_index("ix_tool_actions_run_id", "tool_actions", ["run_id"])
     op.create_index("ix_tool_actions_status", "tool_actions", ["status"])
-    op.create_index("ix_tool_actions_idempotency_key", "tool_actions", ["idempotency_key"], unique=True)
+    op.create_index(
+        "ix_tool_actions_idempotency_key", "tool_actions", ["idempotency_key"], unique=True
+    )
     op.create_index("ix_tool_actions_created_at", "tool_actions", ["created_at"])
 
 

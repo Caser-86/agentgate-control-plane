@@ -5,7 +5,6 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-
 revision: str = "0006_control_task_lease_version"
 down_revision: str | Sequence[str] | None = "0005_worker_protocol"
 branch_labels: str | Sequence[str] | None = None

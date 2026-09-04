@@ -146,8 +146,8 @@ try {
         $iterations++
         $caseRoot = Join-Path $runRoot ("case-$iterations")
         New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
-        $relativePath = "case-$iterations/demo.txt"
-        $filePath = Join-Path $caseRoot "demo.txt"
+        $relativePath = "case-$iterations/payload.txt"
+        $filePath = Join-Path $caseRoot "payload.txt"
         $content = [System.Text.UTF8Encoding]::new($false).GetBytes("AgentGate soak iteration $iterations")
         [System.IO.File]::WriteAllBytes($filePath, $content)
         $expectedDigest = (Get-FileHash -LiteralPath $filePath -Algorithm SHA256).Hash.ToLowerInvariant()

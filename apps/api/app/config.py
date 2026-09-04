@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Self
 
-from pydantic import Field, model_validator
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -31,7 +31,10 @@ class Settings(BaseSettings):
     api_port: int = Field(default=8000, ge=1, le=65535)
     web_port: int = Field(default=5173, ge=1, le=65535)
     environment: str = Field(default="production", validation_alias="AGENTGATE_ENV")
-    seed_demo: bool = Field(default=False, validation_alias="AGENTGATE_SEED_DEMO")
+    seed_example: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("AGENTGATE_SEED_EXAMPLE", "AGENTGATE_SEED_DEMO"),
+    )
     max_steps: int = 8
     tool_timeout_seconds: int = 10
     run_timeout_seconds: int = 120

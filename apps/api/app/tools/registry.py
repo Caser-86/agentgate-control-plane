@@ -52,7 +52,7 @@ class ToolRegistry:
             "get_service_health": RegisteredTool(
                 ToolSpec(
                     name="get_service_health",
-                    description="Read the health and restart count of a local demo service.",
+                    description="Read the health and restart count of a local service.",
                     parameters_schema=ServiceArgs.model_json_schema(),
                     risk_level=RiskLevel.LOW,
                     read_only=True,
@@ -63,7 +63,7 @@ class ToolRegistry:
             "search_logs": RegisteredTool(
                 ToolSpec(
                     name="search_logs",
-                    description="Read deterministic diagnostic logs for a local demo service.",
+                    description="Read deterministic diagnostic logs for a local service.",
                     parameters_schema=SearchLogsArgs.model_json_schema(),
                     risk_level=RiskLevel.LOW,
                     read_only=True,
@@ -74,7 +74,7 @@ class ToolRegistry:
             "restart_service": RegisteredTool(
                 ToolSpec(
                     name="restart_service",
-                    description="Restart a local demo service and restore it to healthy.",
+                    description="Restart a local service and restore it to healthy.",
                     parameters_schema=RestartServiceArgs.model_json_schema(),
                     risk_level=RiskLevel.MEDIUM,
                     read_only=False,
@@ -85,7 +85,7 @@ class ToolRegistry:
             "rotate_api_key": RegisteredTool(
                 ToolSpec(
                     name="rotate_api_key",
-                    description="Request an API key rotation; never executable in the local demo.",
+                    description="Request an API key rotation; not executable by the local policy.",
                     parameters_schema=ServiceArgs.model_json_schema(),
                     risk_level=RiskLevel.HIGH,
                     read_only=False,

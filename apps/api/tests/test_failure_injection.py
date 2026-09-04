@@ -11,7 +11,7 @@ from sqlmodel import Session, select
 from app.control.enums import SideEffectCertainty, TaskKind, TaskStatus
 from app.control.models import ControlTask, WorkerExecutionGrant, WorkerRegistration
 from app.control.repositories import append_outbox_event, claim_next_task, enqueue_task
-from app.db import create_db_and_tables, create_db_engine, seed_demo_state
+from app.db import create_db_and_tables, create_db_engine, seed_example_state
 from app.models import ServiceState
 from app.processes.control_worker import ControlWorker
 from app.services.executor import ExecutionLeaseLostError, ToolExecutor
@@ -67,7 +67,7 @@ def test_database_disconnect_before_claim_stops_execution_and_preserves_queued_t
 async def test_pre_grant_disconnect_calls_no_handler_and_leaves_auditable_safe_failure() -> None:
     engine = _engine()
     with Session(engine) as session:
-        seed_demo_state(session)
+        seed_example_state(session)
         from app.models import ActionStatus, AgentRun, PolicyDecision, RiskLevel, ToolAction
 
         run = AgentRun(user_request="restart", provider="mock", model="mock")
@@ -251,14 +251,14 @@ def test_browser_sse_reconnect_reads_only_outbox_events_after_cursor(
 def test_duplicate_approval_conflicts_without_an_extra_task(
     auth_client: tuple[TestClient, object, object],
 ) -> None:
-    from app.db import seed_demo_state
+    from app.db import seed_example_state
     from app.repositories import AuditRepository
     from tests.conftest import authenticate_client
     from tests.test_security_regressions import _pending_action
 
     client, engine, token_file = auth_client
     with Session(engine) as session:
-        seed_demo_state(session)
+        seed_example_state(session)
         action = _pending_action(session)
     authenticate_client(client, token_file)
     first = client.post(f"/api/approvals/{action.id}/deny", json={})

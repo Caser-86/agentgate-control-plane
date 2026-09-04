@@ -5,7 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session
 
-from app.db import seed_demo_state
+from app.db import seed_example_state
 from app.repositories import AuditRepository, RunRepository
 from app.services.audit import AuditService
 from tests.conftest import authenticate_client
@@ -15,7 +15,7 @@ from tests.conftest import authenticate_client
 def api_client(auth_client: tuple[TestClient, object, object]) -> tuple[TestClient, UUID]:
     client, engine, token_file = auth_client
     with Session(engine) as session:
-        seed_demo_state(session)
+        seed_example_state(session)
         run = RunRepository(session).create("Inspect payments-api", "mock", "mock")
         run_id = run.id
         AuditService(AuditRepository(session)).append(

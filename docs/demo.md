@@ -1,6 +1,6 @@
 # AgentGate 本地功能验收手册
 
-这份手册面向第一次打开项目的人。它描述真实功能的验收路径；面试时由你自行选择操作顺序，不需要产品内置独立演示页面。
+这份手册面向第一次打开项目的人，描述真实功能的验收路径。产品界面只提供正式功能入口，不内置独立演示页面。
 
 ## 一条命令准备本地环境
 
@@ -102,7 +102,7 @@ API → PolicyEngine → 审批队列 → Native Worker
 ```powershell
 $headers = @{
   Authorization = "Bearer ***"
-  "Idempotency-Key" = "interview-demo-001"
+  "Idempotency-Key" = "file-governance-001"
 }
 $body = @{
   action = "file.quarantine.v1"
@@ -136,7 +136,7 @@ Invoke-RestMethod -Method Get `
 
 相同 client 使用相同幂等键重放，会得到原动作结果，不会再次移动同一个文件。
 
-## 原有 Agent 运行演示
+## Agent 运行验收
 
 如果要查看模型编排而非真实磁盘动作：
 
@@ -187,4 +187,4 @@ Invoke-RestMethod http://127.0.0.1:18230/api/platform/health | ConvertTo-Json -D
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\stop-local.ps1
 ```
 
-停止项目不会删除 PostgreSQL 数据卷、`.env`、审计记录或 Worker 的 DPAPI 状态。`-ResetDemoData` 也只会删除演示工作区中脚本生成的两个文件，不会删除数据库或其他用户目录。
+停止项目不会删除 PostgreSQL 数据卷、`.env`、审计记录或 Worker 的 DPAPI 状态。`-ResetDemoData` 是兼容现有脚本调用的参数，只会删除文件治理工作区中脚本生成的两个测试文件，不会删除数据库或其他用户目录。
