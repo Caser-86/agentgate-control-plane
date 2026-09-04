@@ -106,12 +106,14 @@ export function AppShell() {
         <div className="environment-chip"><span className="live-dot" /> 本机运行中</div>
         <nav aria-label="主导航" className="primary-nav">
           <span className="nav-label">安全控制台</span>
-          <NavLink to="/demo" className={({ isActive }) => isActive ? "active" : ""}><span className="nav-leading"><span className="nav-symbol" aria-hidden="true">✦</span><span>安全演示</span></span><span className="nav-count">01</span></NavLink>
+          <NavLink to="/" end className={({ isActive }) => isActive ? "active" : ""}><span className="nav-leading"><span className="nav-symbol" aria-hidden="true">⌂</span><span>运行</span></span><span className="nav-count">01</span></NavLink>
           <NavLink to="/actions" className={({ isActive }) => isActive ? "active" : ""}><span className="nav-leading"><span className="nav-symbol" aria-hidden="true">↗</span><span>动作</span></span><span className="nav-count">02</span></NavLink>
           <NavLink to="/approvals" className={({ isActive }) => isActive ? "active" : ""}><span className="nav-leading"><span className="nav-symbol" aria-hidden="true">!</span><span>审批</span></span><span className="nav-count">03</span></NavLink>
-          <NavLink to="/workspaces" className={({ isActive }) => isActive ? "active" : ""}><span className="nav-leading"><span className="nav-symbol" aria-hidden="true">□</span><span>工作区</span></span><span className="nav-count">04</span></NavLink>
-          <NavLink to="/audit" className={({ isActive }) => isActive ? "active" : ""}><span className="nav-leading"><span className="nav-symbol" aria-hidden="true">≡</span><span>审计</span></span><span className="nav-count">05</span></NavLink>
-          <NavLink to="/system" className={({ isActive }) => isActive ? "active" : ""}><span className="nav-leading"><span className="nav-symbol" aria-hidden="true">⚙</span><span>系统</span></span><span className="nav-count">06</span></NavLink>
+          <NavLink to="/files" className={({ isActive }) => isActive ? "active" : ""}><span className="nav-leading"><span className="nav-symbol" aria-hidden="true">□</span><span>文件治理</span></span><span className="nav-count">04</span></NavLink>
+          <NavLink to="/workspaces" className={({ isActive }) => isActive ? "active" : ""}><span className="nav-leading"><span className="nav-symbol" aria-hidden="true">▣</span><span>工作区</span></span><span className="nav-count">05</span></NavLink>
+          <NavLink to="/monitor" className={({ isActive }) => isActive ? "active" : ""}><span className="nav-leading"><span className="nav-symbol" aria-hidden="true">◌</span><span>监控</span></span><span className="nav-count">06</span></NavLink>
+          <NavLink to="/audit" className={({ isActive }) => isActive ? "active" : ""}><span className="nav-leading"><span className="nav-symbol" aria-hidden="true">≡</span><span>审计</span></span><span className="nav-count">07</span></NavLink>
+          <NavLink to="/system" className={({ isActive }) => isActive ? "active" : ""}><span className="nav-leading"><span className="nav-symbol" aria-hidden="true">⚙</span><span>系统</span></span><span className="nav-count">08</span></NavLink>
         </nav>
         <div className="sidebar-footer">
           <div className="sidebar-footer-heading"><span className="nav-label">当前连接</span><span className={runtime.connected ? "connectivity connected" : "connectivity"} aria-live="polite">{runtime.connected ? "在线" : "检查中"}</span></div>

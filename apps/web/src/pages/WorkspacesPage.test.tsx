@@ -6,8 +6,8 @@ vi.mock("../api/workspaces", () => ({
   listWorkspaces: vi.fn().mockResolvedValue([
     {
       id: "workspace-1",
-      name: "面试演示工作区",
-      root_path: "C:\\AgentGate\\workspaces\\demo",
+      name: "源码工作区",
+      root_path: "C:\\AgentGate\\workspaces\\source",
       quarantine_root_path: "C:\\AgentGate\\.agentgate-quarantine\\workspace-1",
       protected_patterns: [".env", "*.pem"],
       enabled: true,
@@ -24,7 +24,7 @@ describe("WorkspacesPage", () => {
     render(<WorkspacesPage />);
 
     expect(await screen.findByRole("heading", { name: "工作区" })).toBeVisible();
-    expect(screen.getAllByText("面试演示工作区").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("源码工作区").length).toBeGreaterThan(0);
     expect(screen.getByText(/只显示给本地管理员/)).toBeVisible();
     expect(screen.getAllByText(".env").length).toBeGreaterThan(0);
   });

@@ -13,7 +13,7 @@ vi.mock("../api/client", () => ({
 
 const meta = {
   provider: "mock",
-  model: "demo-model",
+  model: "mock-model",
   api_base_url: "http://127.0.0.1:8000",
   status: "ok",
 };

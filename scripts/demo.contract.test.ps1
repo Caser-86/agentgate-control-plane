@@ -16,7 +16,7 @@ foreach ($required in @(
     "workerArgumentLine",
     "ArgumentList `$workerArgumentLine",
     "不改写 .env",
-    "安全演示已准备完成"
+    "文件治理数据已准备完成"
 )) {
     if ($source -notmatch [regex]::Escape($required)) {
         throw "demo.ps1 缺少必要契约：$required"
@@ -33,7 +33,7 @@ $readmeFirstLine = ($readme -split "`r?`n" | Where-Object { $_.Trim() } | Select
 if ($readmeFirstLine -notmatch "AgentGate") { throw "README 首行必须是项目中文标题。" }
 foreach ($required in @(
     "项目解决什么问题",
-    "一键本地演示",
+    "一键本地准备",
     "POST /api/v1/actions",
     "不提供 Windows 内核驱动",
     "PowerShell 执行策略",

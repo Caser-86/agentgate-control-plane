@@ -7,7 +7,7 @@ export default async function globalSetup(): Promise<void> {
   const projects = [
     { name: "approval-flow", apiPort: requestedApiPort },
     { name: "auth-and-queue", apiPort: requestedApiPort + 1 },
-    { name: "security-demo", apiPort: requestedApiPort + 2 },
+    { name: "file-governance", apiPort: requestedApiPort + 2 },
   ];
   for (const project of projects) {
     const readyFile = path.join(

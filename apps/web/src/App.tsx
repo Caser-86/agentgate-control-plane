@@ -6,7 +6,7 @@ import { ActionsPage } from "./pages/ActionsPage";
 import { ApprovalsPage } from "./pages/ApprovalsPage";
 import { PoliciesPage } from "./pages/PoliciesPage";
 import { LoginPage } from "./pages/LoginPage";
-import { SecurityDemoPage } from "./pages/SecurityDemoPage";
+import { FileGovernancePage } from "./pages/FileGovernancePage";
 import { RunDetailPage } from "./pages/RunDetailPage";
 import { RunsPage } from "./pages/RunsPage";
 import { SystemPage } from "./pages/SystemPage";
@@ -21,7 +21,7 @@ function App() {
           <Route path="login" element={<LoginPage />} />
           <Route element={<RequireAuth><AppShell /></RequireAuth>}>
             <Route index element={<RunsPage />} />
-            <Route path="demo" element={<SecurityDemoPage />} />
+            <Route path="files" element={<FileGovernancePage />} />
             <Route path="actions" element={<ActionsPage />} />
             <Route path="approvals" element={<ApprovalsPage />} />
             <Route path="workspaces" element={<WorkspacesPage />} />

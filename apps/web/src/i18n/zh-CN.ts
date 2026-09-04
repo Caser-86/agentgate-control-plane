@@ -91,7 +91,7 @@ const actorLabels: Record<string, string> = {
 };
 
 const reasonLabels: Record<string, string> = {
-  "High-risk actions are denied by the local demo policy.": "本地演示策略会直接拒绝高风险操作。",
+  "High-risk actions are denied by the local demo policy.": "当前策略会直接拒绝高风险操作。",
   "Medium-risk actions require explicit human approval.": "中风险操作会暂停，等待明确的人工作出批准。",
   "Low-risk actions are automatically approved.": "低风险操作会自动批准。",
   "Low-risk read-only actions are automatically approved.": "低风险只读操作会自动批准。",

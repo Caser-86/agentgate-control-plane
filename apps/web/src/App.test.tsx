@@ -43,7 +43,8 @@ describe("App", () => {
     render(<App />);
     expect(await screen.findByRole("heading", { name: "AgentGate" })).toBeInTheDocument();
     expect(screen.getByText("本机运行中")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /安全演示/ })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /文件治理/ })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /运行/ })).toBeInTheDocument();
     expect((await screen.findAllByText("openai_compatible")).length).toBeGreaterThan(0);
     expect((await screen.findAllByText("ark-code-latest")).length).toBeGreaterThan(0);
   });

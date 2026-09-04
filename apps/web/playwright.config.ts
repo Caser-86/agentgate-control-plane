@@ -21,8 +21,8 @@ const projects = [
     webPort: requestedWebPort + 1,
   },
   {
-    name: "security-demo",
-    spec: "security-demo.spec.ts",
+    name: "file-governance",
+    spec: "file-governance.spec.ts",
     apiPort: requestedApiPort + 2,
     webPort: requestedWebPort + 2,
   },

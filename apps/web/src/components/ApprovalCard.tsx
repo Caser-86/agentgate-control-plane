@@ -75,7 +75,7 @@ export function ApprovalCard({ action, onApprove, onDeny, onRefresh }: ApprovalC
         <p className="approval-reason">{reasonLabel(action.reason)}</p>
         <div className="approval-impact">
           <span>影响目标</span>
-          <strong translate="no">{String(action.arguments.service ?? "本地演示服务")}</strong>
+          <strong translate="no">{String(action.arguments.service ?? "本地服务")}</strong>
         </div>
         <details className="arguments-panel" open>
           <summary>参数</summary>

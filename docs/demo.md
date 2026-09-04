@@ -1,8 +1,8 @@
-# AgentGate 本地演示手册
+# AgentGate 本地功能验收手册
 
-这份手册面向第一次打开项目的人。推荐先完成“真实文件治理演示”，再看原有的 Agent 运行、审批和监控页面。
+这份手册面向第一次打开项目的人。它描述真实功能的验收路径；面试时由你自行选择操作顺序，不需要产品内置独立演示页面。
 
-## 一条命令准备演示
+## 一条命令准备本地环境
 
 在 Windows PowerShell 的项目根目录执行：
 
@@ -16,9 +16,9 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\demo.ps1
 1. 用当前命令的端口启动或复用 PostgreSQL、API、scheduler、control-worker 和 Web。
 2. 等待 API 健康检查通过。
 3. 检查 Native Worker 心跳；没有在线 Worker 时，临时创建一次性注册凭据并在后台注册 Worker。
-4. 在 `%LOCALAPPDATA%\AgentGate\demo-workspace` 创建 `demo.txt` 和 `demo-secret.txt`。
-5. 登记或复用“AgentGate 安全演示工作区”。
-6. 打开 `http://127.0.0.1:15173/demo`。
+4. 在 `%LOCALAPPDATA%\AgentGate\demo-workspace` 创建两个本地测试文件。
+5. 登记或复用“AgentGate 文件治理工作区”。
+6. 打开 `http://127.0.0.1:15173/files`。
 
 脚本只在进程环境中临时覆盖端口和工作区允许根目录，不修改 `.env`。任何令牌都不会打印到终端、写入 README 或加入 Git。
 
@@ -35,30 +35,30 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\demo.ps1 `
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\demo.ps1 -NoBrowser
 ```
 
-## 五分钟真实文件演示
+## 五分钟文件治理验收
 
-### 第一步：看见受保护文件被拒绝
+### 第一步：检查文件
 
-在“安全演示”页面点击“开始安全演示”。页面会真实调用 `POST /api/v1/actions`，同时提交两个文件动作：
+在“文件治理”页面选择工作区和“检查文件”，输入文件相对路径后提交。页面会真实调用 `POST /api/v1/actions`：
 
-- `.env`：命中保护规则，结果为“已拒绝/未执行”。API 不创建 Worker 任务，磁盘不会变化。
-- `demo.txt`：普通文件，结果为“待审批”。它不会在审批前移动。
+- 普通文件：只读返回存在性、大小和 SHA-256 摘要，不返回文件内容。
+- `.env` 等保护路径：如果提交隔离动作，会命中保护规则并被拒绝，不创建 Worker 任务。
 
-这是策略拒绝，不是前端把文字染成红色。动作、决策和审计事件都来自 API。
+动作、决策和审计事件都来自 API，不是前端静态状态。
 
 ### 第二步：批准并隔离普通文件
 
-1. 打开“审批”。
-2. 检查工作区、相对路径、风险等级、规则原因和预计副作用。
-3. 确认 Worker 状态为“在线”。离线时批准按钮保持禁用。
-4. 点击“批准并执行”。
-5. 返回“安全演示”，等待动作显示“已隔离”。
+1. 回到“文件治理”，选择“隔离文件”，输入普通文件相对路径并提交。
+2. 打开“审批”。
+3. 检查工作区、相对路径、风险等级、规则原因和预计副作用。
+4. 确认 Worker 状态为“在线”。离线时批准按钮保持禁用。
+5. 点击“批准并执行”，再到“动作”查看最终状态。
 
 Native Worker 会在同一卷的隔离目录中移动 `demo.txt`，并把 SHA-256 摘要、大小、相对路径和结果回报给 API。页面不显示绝对根路径、文件正文或 Worker 原始异常。
 
 ### 第三步：恢复文件
 
-点击“恢复文件”，再次在“审批”中批准恢复动作。最终应看到“已恢复”。恢复逻辑不会覆盖原位置已有的文件；如果用户在恢复前创建了同名文件，动作会进入明确的冲突失败状态。
+在“文件治理”选择“恢复文件”，从隔离记录中选择目标，再次在“审批”中批准恢复动作。最终应看到“已恢复”。恢复逻辑不会覆盖原位置已有的文件；如果用户在恢复前创建了同名文件，动作会进入明确的冲突失败状态。
 
 ### 第四步：检查审计
 
@@ -73,7 +73,7 @@ Native Worker 会在同一卷的隔离目录中移动 `demo.txt`，并把 SHA-25
 
 审计是追加式证据，不支持通过页面修改。敏感字段会递归脱敏。
 
-## 这个演示证明了什么
+## 这套流程验证了什么
 
 它证明 AgentGate 能把“外部 Agent 提议文件动作”放进一个实际可运行的控制边界：
 
@@ -138,7 +138,7 @@ Invoke-RestMethod -Method Get `
 
 ## 原有 Agent 运行演示
 
-如果要展示模型编排而非真实磁盘动作：
+如果要查看模型编排而非真实磁盘动作：
 
 1. 打开“运行”。
 2. 选择“恢复降级服务 → 需审批”。
@@ -146,7 +146,7 @@ Invoke-RestMethod -Method Get `
 4. 在“审批”中批准或拒绝 `restart_service`。
 5. 回到运行详情查看时间线和审计。
 
-这个分支只修改数据库里的演示服务状态，不会重启 Windows 服务。高风险“轮换 API 密钥”会被拒绝，不会调用密钥处理器。
+这个分支只修改数据库里的示例服务状态，不会重启 Windows 服务。高风险“轮换 API 密钥”会被拒绝，不会调用密钥处理器。
 
 ## 失败排查
 
@@ -181,7 +181,7 @@ Invoke-RestMethod http://127.0.0.1:18230/api/platform/health | ConvertTo-Json -D
 
 如果运行环境不存在，执行 `..\scripts\setup-local.ps1`。不要把 enrollment token、Worker token 或管理员密码复制到聊天中。
 
-## 停止演示
+## 停止本地服务
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\stop-local.ps1

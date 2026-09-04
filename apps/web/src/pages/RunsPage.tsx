@@ -63,7 +63,7 @@ export function RunsPage() {
         <form onSubmit={submit}>
           <label htmlFor="task-request">任务请求</label>
           <textarea id="task-request" name="task-request" data-testid="run-request" value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="描述操作目标，以及允许的安全边界…" rows={3} />
-          <div className="composer-footer"><div className="example-chips" aria-label="演示示例">{examples.map((example) => <button type="button" key={example.prompt} onClick={() => setPrompt(example.prompt)}>{example.label}</button>)}</div><button className="button button-primary" data-testid="start-run" type="submit" disabled={submitting || prompt.trim().length < 5}>{submitting ? "正在启动…" : "启动运行"}<span aria-hidden="true">↗</span></button></div>
+          <div className="composer-footer"><div className="example-chips" aria-label="常用请求">{examples.map((example) => <button type="button" key={example.prompt} onClick={() => setPrompt(example.prompt)}>{example.label}</button>)}</div><button className="button button-primary" data-testid="start-run" type="submit" disabled={submitting || prompt.trim().length < 5}>{submitting ? "正在启动…" : "启动运行"}<span aria-hidden="true">↗</span></button></div>
         </form>
       </section>
       {error && <p className="inline-error" role="alert">{error}</p>}

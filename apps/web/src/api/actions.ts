@@ -1,16 +1,12 @@
 import { api } from "./client";
 import type {
   ActionListFilters,
+  ExternalActionRequest,
   ExternalActionStatus,
   ToolAction,
 } from "../types";
 
-export interface SecurityDemoSession {
-  clientTokenId: string;
-  clientToken: string;
-  protected: ExternalActionStatus;
-  ordinary: ExternalActionStatus;
-}
+export type FileActionKind = "inspect" | "quarantine" | "restore";
 
 export const listActions = (filters: ActionListFilters = {}): Promise<ToolAction[]> =>
   api.listActions(filters);
@@ -29,48 +25,47 @@ function idempotencyKey(label: string): string {
   const random = typeof crypto !== "undefined" && "randomUUID" in crypto
     ? crypto.randomUUID()
     : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  return `web-demo-${label}-${random}`;
+  return `web-file-action-${label}-${random}`;
 }
 
-export async function runSecurityDemo(
+function externalRequest(
   workspaceId: string,
-  ordinaryPath = "demo.txt",
-): Promise<SecurityDemoSession> {
+  kind: FileActionKind,
+  relativePath?: string,
+  quarantineEntryId?: string,
+  reason?: string,
+): ExternalActionRequest {
+  const action = `file.${kind}.v1` as ExternalActionRequest["action"];
+  return {
+    action,
+    workspace_id: workspaceId,
+    ...(relativePath ? { relative_path: relativePath } : {}),
+    ...(quarantineEntryId ? { quarantine_entry_id: quarantineEntryId } : {}),
+    ...(reason ? { reason } : {}),
+  };
+}
+
+export async function submitFileAction(
+  workspaceId: string,
+  kind: FileActionKind,
+  relativePath?: string,
+  quarantineEntryId?: string,
+  reason?: string,
+): Promise<ExternalActionStatus> {
   const client = await api.createClientToken({
-    name: "安全演示临时令牌",
+    name: "文件治理临时令牌",
     scopes: ["propose:actions"],
     expires_in_seconds: 600,
   });
   try {
-    const protectedAction = await api.submitExternalAction(
+    const submitted = await api.submitExternalAction(
       client.token,
-      {
-        action: "file.quarantine.v1",
-        workspace_id: workspaceId,
-        relative_path: ".env",
-        reason: "验证受保护文件不会被误删或移动",
-      },
-      idempotencyKey("protected"),
+      externalRequest(workspaceId, kind, relativePath, quarantineEntryId, reason),
+      idempotencyKey(kind),
     );
-    const ordinaryAction = await api.submitExternalAction(
-      client.token,
-      {
-        action: "file.quarantine.v1",
-        workspace_id: workspaceId,
-        relative_path: ordinaryPath,
-        reason: "演示审批后隔离普通文件",
-      },
-      idempotencyKey("ordinary"),
-    );
-    return {
-      clientTokenId: client.id,
-      clientToken: client.token,
-      protected: protectedAction,
-      ordinary: ordinaryAction,
-    };
-  } catch (error) {
+    return waitForAction(client.token, submitted.id);
+  } finally {
     await api.revokeClientToken(client.id).catch(() => undefined);
-    throw error;
   }
 }
 
@@ -86,30 +81,4 @@ export async function waitForAction(
     latest = await api.getExternalActionStatus(token, actionId);
   }
   return latest;
-}
-
-export async function approveAndWait(
-  token: string,
-  action: ToolAction,
-): Promise<ExternalActionStatus> {
-  await approveAction(action.id);
-  return waitForAction(token, action.id);
-}
-
-export async function restoreAndWait(
-  token: string,
-  workspaceId: string,
-  quarantineEntryId: string,
-): Promise<ExternalActionStatus> {
-  const restore = await api.submitExternalAction(
-    token,
-    {
-      action: "file.restore.v1",
-      workspace_id: workspaceId,
-      quarantine_entry_id: quarantineEntryId,
-    },
-    idempotencyKey("restore"),
-  );
-  if (restore.status === "pending_approval") await approveAction(restore.id);
-  return waitForAction(token, restore.id);
 }

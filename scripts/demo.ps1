@@ -111,7 +111,7 @@ $demoParent = Split-Path -Parent $demoRoot
 $workerStateDir = [System.IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA "AgentGate\worker"))
 $workerCredentials = Join-Path $workerStateDir "credentials.bin"
 $apiBase = "http://127.0.0.1:$ApiPort"
-$webUrl = "http://127.0.0.1:$WebPort/demo"
+$webUrl = "http://127.0.0.1:$WebPort/files"
 $startLocal = Join-Path $PSScriptRoot "start-local.ps1"
 $startWorker = Join-Path $PSScriptRoot "start-worker.ps1"
 $workerPython = Join-Path $repoRoot "apps\worker\.venv\Scripts\python.exe"
@@ -171,7 +171,7 @@ if (-not $workerReady) {
     $enrollment = $null
     if (-not (Test-Path -LiteralPath $workerCredentials -PathType Leaf)) {
         $enrollment = Invoke-LocalApi -Method POST -Uri "$apiBase/api/auth/tokens" -Headers $adminHeaders -Body @{
-            name = "本地安全演示 Worker 注册"
+            name = "本地文件治理 Worker 注册"
             scopes = @("worker:enroll")
             expires_in_seconds = 600
         } -FailureMessage "创建 Worker 注册凭据失败"
@@ -214,11 +214,11 @@ $workspace = $workspaces | Where-Object {
 } | Select-Object -First 1
 if ($null -eq $workspace) {
     $workspace = Invoke-LocalApi -Method POST -Uri "$apiBase/api/v1/workspaces" -Headers $adminHeaders -Body @{
-        name = "AgentGate 安全演示工作区"
+        name = "AgentGate 文件治理工作区"
         root_path = $demoRoot
-    } -FailureMessage "登记安全演示工作区失败"
+    } -FailureMessage "登记文件治理工作区失败"
 } elseif (-not $workspace.enabled) {
-    $workspace = Invoke-LocalApi -Method PATCH -Uri "$apiBase/api/v1/workspaces/$($workspace.id)" -Headers $adminHeaders -Body @{ enabled = $true } -FailureMessage "启用安全演示工作区失败"
+    $workspace = Invoke-LocalApi -Method PATCH -Uri "$apiBase/api/v1/workspaces/$($workspace.id)" -Headers $adminHeaders -Body @{ enabled = $true } -FailureMessage "启用文件治理工作区失败"
 }
 
 New-Item -ItemType Directory -Path $demoRoot -Force | Out-Null
@@ -226,12 +226,12 @@ if ($ResetDemoData) {
     Remove-DemoFile (Join-Path $demoRoot "demo.txt")
     Remove-DemoFile (Join-Path $demoRoot "demo-secret.txt")
 }
-Ensure-DemoFile (Join-Path $demoRoot "demo.txt") "AgentGate 安全演示文件。内容由脚本生成，不包含真实凭据。"
+Ensure-DemoFile (Join-Path $demoRoot "demo.txt") "AgentGate 文件治理测试文件。内容由脚本生成，不包含真实凭据。"
 Ensure-DemoFile (Join-Path $demoRoot "demo-secret.txt") ("演示专用占位内容：" + [Guid]::NewGuid().ToString("N"))
 
-Write-Host "安全演示已准备完成。"
+Write-Host "文件治理数据已准备完成。"
 Write-Host "API：$apiBase"
 Write-Host "Worker：在线"
 Write-Host "演示工作区：$demoRoot"
-Write-Host "下一步：打开 $webUrl，点击‘开始安全演示’。"
+Write-Host "下一步：打开 $webUrl，选择工作区和文件动作。"
 if (-not $NoBrowser) { Start-Process $webUrl | Out-Null }
