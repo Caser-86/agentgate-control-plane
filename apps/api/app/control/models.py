@@ -46,6 +46,9 @@ class WorkerRegistration(SQLModel, table=True):
     token_digest: str = Field(unique=True, index=True)
     status: WorkerStatus = Field(default=WorkerStatus.ACTIVE, index=True)
     last_heartbeat_at: datetime | None = Field(default=None, index=True)
+    execution_status: str = Field(default="unknown", max_length=32, index=True)
+    pending_report_count: int = Field(default=0)
+    last_error_code: str | None = Field(default=None, max_length=128)
     created_at: datetime = Field(default_factory=utc_now, index=True)
     updated_at: datetime = Field(default_factory=utc_now)
 

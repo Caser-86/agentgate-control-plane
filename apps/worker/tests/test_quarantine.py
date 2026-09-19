@@ -1,4 +1,5 @@
 import os
+import stat
 import sys
 import types
 from pathlib import Path
@@ -7,9 +8,11 @@ from uuid import uuid4
 import pytest
 
 from agentgate_worker.client import WorkspaceContext
+from agentgate_worker.filesystem import FileActionError
 from agentgate_worker.quarantine import (
     QuarantineService,
     _move_without_replace,
+    _validate_missing_destination,
     recover_incomplete_journal,
 )
 
@@ -81,6 +84,25 @@ def test_incomplete_journal_requires_manual_review(tmp_path: Path) -> None:
     assert notices[0].decision == "manual_review_required"
 
 
+def test_restore_prepare_is_not_hidden_by_quarantine_complete(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    records = [
+        {"action_id": "same-action", "phase": "prepared"},
+        {"action_id": "same-action", "phase": "completed"},
+        {"action_id": "same-action", "phase": "restore_prepared"},
+    ]
+    monkeypatch.setattr(
+        "agentgate_worker.quarantine._read_journal", lambda _path: records
+    )
+
+    notices = recover_incomplete_journal(tmp_path / "journal.jsonl")
+
+    assert len(notices) == 1
+    assert notices[0].action_id == "same-action"
+    assert notices[0].decision == "manual_review_required"
+
+
 def test_windows_move_uses_flag_from_win32file(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -104,3 +126,24 @@ def test_windows_move_uses_flag_from_win32file(
 
     assert flags == [8]
     assert destination.read_bytes() == b"stable"
+
+
+def test_restore_rejects_reparse_point_at_workspace_root(
+    context: WorkspaceContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = Path(context.root_path)
+    real_lstat = os.lstat
+
+    def fake_lstat(path: os.PathLike[str] | str) -> os.stat_result:
+        metadata = real_lstat(path)
+        if Path(path) == root:
+            return types.SimpleNamespace(
+                st_mode=stat.S_IFDIR,
+                st_file_attributes=0x0400,
+            )  # type: ignore[return-value]
+        return metadata
+
+    monkeypatch.setattr("agentgate_worker.quarantine.os.lstat", fake_lstat)
+
+    with pytest.raises(FileActionError, match="reparse point"):
+        _validate_missing_destination(context, "nested/report.txt")

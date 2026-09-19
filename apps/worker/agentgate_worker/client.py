@@ -39,7 +39,16 @@ SELF_CHECK_RESULT_KEYS = frozenset(
 
 
 class WorkerProtocolError(RuntimeError):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        code: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.code = code
 
 
 def validate_api_url(base_url: str) -> str:
@@ -283,7 +292,20 @@ class HttpTransport:
                 method, f"{self.base_url}{path}", headers=headers, json=json, timeout=10.0
             )
             if response.status_code >= 400:
-                raise WorkerProtocolError(f"Worker API request rejected: {response.status_code}")
+                code: str | None = None
+                try:
+                    payload = response.json()
+                except ValueError:
+                    payload = None
+                if isinstance(payload, dict):
+                    detail = payload.get("detail")
+                    if isinstance(detail, dict) and isinstance(detail.get("code"), str):
+                        code = detail["code"]
+                raise WorkerProtocolError(
+                    f"Worker API request rejected: {response.status_code}",
+                    status_code=response.status_code,
+                    code=code,
+                )
             if response.status_code == 204:
                 return {}
             payload = response.json()
@@ -400,7 +422,20 @@ class WorkerClient:
         )
 
     def heartbeat(self) -> None:
-        self._request("POST", "/api/v1/worker/heartbeat", {})
+        if self.journal.has_reconciliation_required():
+            execution_status = "reconciliation_required"
+        elif self.journal.pending_report_count() > 0:
+            execution_status = "blocked"
+        else:
+            execution_status = "ready"
+        self._request(
+            "POST",
+            "/api/v1/worker/heartbeat",
+            {
+                "execution_status": execution_status,
+                "pending_report_count": self.journal.pending_report_count(),
+            },
+        )
 
     def claim(self) -> TaskGrant | None:
         response = self._request(
@@ -547,6 +582,12 @@ class WorkerClient:
         self.journal.mark_reported(grant.task_id)
 
     def recover_pending_reports(self) -> int:
+        if self.journal.has_reconciliation_required():
+            raise WorkerProtocolError(
+                "Worker reconciliation is required",
+                status_code=409,
+                code="reconciliation_required",
+            )
         recovered = 0
         for task_id, request_digest, result in self.journal.pending_reports():
             if result.get("result_kind") in {
@@ -559,11 +600,24 @@ class WorkerClient:
                 safe_result = sanitize_monitor_result(result)
             else:
                 safe_result = sanitize_self_check_result(result)
-            self._request(
-                "POST",
-                f"/api/v1/worker/tasks/{task_id}/report",
-                {"request_digest": request_digest, "result": safe_result},
-            )
+            try:
+                self._request(
+                    "POST",
+                    f"/api/v1/worker/tasks/{task_id}/report",
+                    {"request_digest": request_digest, "result": safe_result},
+                )
+            except WorkerProtocolError as error:
+                if error.status_code == 409 and error.code in {
+                    "result_replay_conflict",
+                    "task_not_completed",
+                }:
+                    self.journal.mark_reconciliation_required(task_id, error.code)
+                    raise WorkerProtocolError(
+                        "Worker reconciliation is required",
+                        status_code=409,
+                        code="reconciliation_required",
+                    ) from error
+                raise
             self.journal.mark_reported(task_id)
             recovered += 1
         return recovered

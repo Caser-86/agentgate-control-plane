@@ -273,3 +273,46 @@ def test_unscoped_client_token_cannot_approve_pending_action(
             session.exec(select(ControlTask).where(ControlTask.run_id == action.run_id)).all() == []
         )
         assert len(AuditRepository(session).list(action.run_id)) == before_audit
+
+
+def test_api_responses_include_browser_security_headers(
+    auth_client: tuple[TestClient, Engine, object],
+) -> None:
+    client, _, _ = auth_client
+
+    response = client.get("/api/auth/status")
+
+    assert response.headers["X-Content-Type-Options"] == "nosniff"
+    assert response.headers["X-Frame-Options"] == "DENY"
+    assert response.headers["Referrer-Policy"] == "no-referrer"
+    assert response.headers["Cache-Control"] == "no-store"
+
+
+def test_cors_preflight_rejects_headers_outside_the_browser_contract(
+    auth_client: tuple[TestClient, Engine, object],
+) -> None:
+    client, _, _ = auth_client
+
+    response = client.options(
+        "/api/auth/status",
+        headers={
+            "Origin": "http://localhost:5173",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "x-unexpected-header",
+        },
+    )
+
+    assert response.status_code == 400
+
+
+def test_http_error_fallback_is_localized_for_unknown_routes(
+    auth_client: tuple[TestClient, Engine, object],
+) -> None:
+    client, _, _ = auth_client
+
+    response = client.get("/route-that-does-not-exist")
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "error": {"code": "http_error", "message": "请求失败，请稍后重试。"}
+    }

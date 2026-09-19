@@ -63,6 +63,10 @@ class Settings(BaseSettings):
     def web_origins(self) -> list[str]:
         return [self.web_origin, f"http://127.0.0.1:{self.web_port}"]
 
+    @property
+    def api_docs_enabled(self) -> bool:
+        return self.environment in {"development", "test"}
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -7,6 +7,13 @@ dependencies = [
   "pywin32>=311; sys_platform == 'win32'",
 ]
 
+[project.optional-dependencies]
+dev = [
+  "mypy>=2.3,<3",
+  "pytest>=9.1,<10",
+  "ruff>=0.16,<1",
+]
+
 [project.scripts]
 agentgate-worker = "agentgate_worker.main:main"
 

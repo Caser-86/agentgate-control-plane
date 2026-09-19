@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import { api } from "../api/client";
 
-export type WorkerStatus = "checking" | "online" | "degraded" | "unavailable";
+export type WorkerStatus = "checking" | "online" | "blocked" | "degraded" | "unavailable";
 
 export type RuntimeState = {
   provider: string;
@@ -61,9 +61,11 @@ export function AppShell() {
       void api.getPlatformHealth().then((health) => {
         if (!active) return;
         const workerHealth = health.checks.worker;
+        const executionStatus = workerHealth?.details.execution_status;
+        const blocked = executionStatus === "blocked" || executionStatus === "reconciliation_required";
         setRuntime((current) => ({
           ...current,
-          workerStatus: workerHealth?.status === "ok" ? "online" : "degraded",
+          workerStatus: blocked ? "blocked" : workerHealth?.status === "ok" ? "online" : "degraded",
         }));
       }).catch(() => {
         if (!active) return;
@@ -81,12 +83,14 @@ export function AppShell() {
   const workerStatusLabel: Record<WorkerStatus, string> = {
     checking: "检查中",
     online: "在线",
+    blocked: "执行受阻",
     degraded: "需要检查",
     unavailable: "不可用",
   };
   const workerStatusClass: Record<WorkerStatus, string> = {
     checking: "worker-health checking",
     online: "worker-health online",
+    blocked: "worker-health degraded",
     degraded: "worker-health degraded",
     unavailable: "worker-health unavailable",
   };

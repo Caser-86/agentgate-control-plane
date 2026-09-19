@@ -2,7 +2,7 @@
 
 AgentGate 是一个面向本机运行的 AI Agent 操作治理平台。它把 Agent 的“想做什么”与系统的“允许做什么、是否需要人工批准、执行后发生了什么”分开管理。
 
-> 当前版本：Phase 1，本地控制流与只读监控 MVP
+> 当前版本：本地单用户控制平面，包含审批、审计、受管文件动作和只读监控
 >
 > 仓库默认模型：`mock` 确定性提供方；本机可在 `.env` 中切换为 Ark 等真实模型
 >
@@ -11,6 +11,8 @@ AgentGate 是一个面向本机运行的 AI Agent 操作治理平台。它把 Ag
 ![AgentGate 本地控制台](docs/assets/local-demo.png)
 
 这张截图展示本地控制台的产品界面，不代表生产部署或真实基础设施操作已经启用。
+
+当前项目状态以 [CONTEXT.md](CONTEXT.md) 为准，尚未完成的工作以 [TODO.md](TODO.md) 为准。历史设计、实施计划和测试证据集中在 [docs/](docs/)。
 
 ## 目录
 
@@ -269,10 +271,11 @@ http://127.0.0.1:15173
 ```powershell
 Set-Location 'D:\LLM Files\files\agentgate-control-plane'
 docker compose ps
-Invoke-RestMethod http://127.0.0.1:18230/health
+$apiPort = if ($env:AGENTGATE_API_PORT) { $env:AGENTGATE_API_PORT } else { '8000' }
+Invoke-RestMethod "http://127.0.0.1:$apiPort/health"
 ```
 
-如果使用默认端口，把 `18230` 换成 `8000`。健康检查返回 `status: ok` 才表示 API 已经启动。
+健康检查返回 `status: ok` 才表示 API 已经启动。若平台状态仍为 `degraded`，继续检查 `/api/platform/health` 中的 Native Worker，而不是只看 API 是否存活。
 
 ### 6.4 停止项目
 
@@ -609,12 +612,17 @@ Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:18230/api/v1/actions" `
 - 任意凭据读取或轮换。
 - 远程 API 地址。
 
-手动启动前先运行一次 `setup-local.ps1`，然后：
+首次使用先运行一次 `setup-local.ps1`。如果状态目录中已经有 Worker 凭据，可以持续启动：
 
 ```powershell
 Set-Location 'D:\LLM Files\files\agentgate-control-plane'
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-worker.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-worker.ps1 `
+  -Continuous `
+  -ApiUrl http://127.0.0.1:8000 `
+  -StateDir (Join-Path $env:LOCALAPPDATA 'AgentGate\worker')
 ```
+
+如果还没有凭据，使用上一节的 `register-worker.ps1` 完成首次注册；不要把引导令牌直接写入长期启动参数。
 
 如果 API 使用非默认端口，脚本会从 Compose 配置解析本机 API 端口，也可以显式指定：
 
@@ -624,7 +632,18 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-worker.p
 
 ### 11.1 第一次注册
 
-原生 Worker 的首次注册需要一次性引导令牌。令牌只用于换取本机 Worker 凭据；注册成功后，凭据会保存在 Worker 状态目录中，后续启动不再需要引导令牌。
+推荐使用项目提供的注册脚本。它会向当前本机 API 申请一个 10 分钟有效的一次性 `worker:enroll` 令牌，通过子进程环境变量传给 Worker，不打印令牌，也不会覆盖已有 `credentials.bin`：
+
+```powershell
+Set-Location 'D:\LLM Files\files\agentgate-control-plane'
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\register-worker.ps1 `
+  -ApiUrl http://127.0.0.1:18230 `
+  -StateDir (Join-Path $env:LOCALAPPDATA 'AgentGate\worker')
+```
+
+注册成功后，Worker 会在后台持续运行，凭据保存在状态目录中，后续启动不再需要令牌。如果状态目录已有凭据，脚本会停止而不覆盖；此时直接使用 `start-worker.ps1 -Continuous`。
+
+如需手工使用已经由管理员创建的一次性令牌，令牌只用于换取本机 Worker 凭据；不要把真实令牌写入脚本、`.env`、任务计划参数或聊天记录：
 
 在项目根目录执行以下命令，把尖括号内容替换为你刚生成的令牌；不要把真实令牌写入脚本、`.env`、任务计划参数或聊天记录：
 
@@ -687,7 +706,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\soak-worker.ps
   -IntervalSeconds 30
 ```
 
-日志默认写入 `data/worker-soak.log`。`PASSED` 表示整个测试期间没有失败样本；短暂失败会被记录为 `COMPLETED_WITH_TRANSIENT_FAILURES`，连续失败达到 3 次时提前结束并返回退出码 2。测试期间可用 `Get-Content .\data\worker-soak.log -Wait` 查看新增样本；不要把日志提交到 Git。
+日志默认写入 `data/worker-soak.log`。只有覆盖率、最大采样间隔、探测新鲜度和业务失败都满足要求时才会写入 `PASSED`；任何失败样本都会返回退出码 2，环境中断返回退出码 3，证据不足返回退出码 2。测试期间可用 `Get-Content .\data\worker-soak.log -Wait` 查看新增样本；不要把日志提交到 Git。
 
 ## 十二、测试与验收
 
@@ -745,7 +764,7 @@ $env:AGENTGATE_E2E_PYTHON = "..\api\.venv\Scripts\python.exe"
 npm.cmd run test:e2e
 ```
 
-E2E 流程会验证登录、任务队列、审批和拒绝分支。它需要能够启动测试 API，并使用独立的临时测试数据库，不要把 E2E 测试数据库当作正式本地数据。如果本机的 `8000` 或 `5173` 已被其他项目占用，可以指定测试端口：
+E2E 流程会验证登录、任务队列、审批和拒绝分支。它需要能够启动测试 API，并使用独立的临时测试数据库，不要把 E2E 测试数据库当作正式本地数据。统一验证脚本会自动选择空闲测试端口；单独运行 `npm.cmd run test:e2e` 时，如果本机的 `8000` 或 `5173` 已被其他项目占用，可以指定测试端口：
 
 ```powershell
 $env:AGENTGATE_E2E_API_PORT = "18300"
@@ -897,10 +916,13 @@ agentgate-control-plane/
 │  ├─ start-local.ps1       启动 PostgreSQL、迁移和 Compose 服务
 │  ├─ stop-local.ps1        停止本地服务
 │  ├─ migrate-local.ps1     执行 Alembic 迁移
+│  ├─ register-worker.ps1    安全申请令牌并注册本机原生 Worker
 │  ├─ start-worker.ps1      启动本机原生 Worker
 │  ├─ install-worker.ps1    安装当前用户登录自启动任务
 │  ├─ uninstall-worker.ps1  移除登录自启动任务（保留 Worker 状态）
 │  ├─ soak-worker.ps1       执行 Worker 和监控目标长时间稳定性测试
+│  ├─ backup-local.ps1      生成数据库、journal 和隔离目录备份
+│  ├─ restore-local.ps1     备份预检和显式离线恢复
 │  ├─ start-worker.contract.test.ps1
 │  ├─ task-scheduler.contract.test.ps1
 │  ├─ verify-foundation.ps1 验证迁移、队列、heartbeat 和 Worker 自检
@@ -943,11 +965,11 @@ agentgate-control-plane/
    - 完成登录、策略、审批、持久化队列、审计和 mock 流程。
    - 只允许安全的本地自检协议。
 
-2. **Phase 1：真实本机只读监控**（当前已完成 MVP）
+2. **Phase 1：真实本机只读监控**（已具备可用基础）
    - 已接入本机 HTTP 和 Windows 服务只读探针、周期调度、失败/恢复阈值和事件去重。
    - 已提供中文监控页面、目标登记 API、探测结果和审计记录。
    - 已支持原生 Worker 持续轮询、心跳保活、断线退避、journal 恢复和 Windows 登录自启动。
-   - 下一步应补充 24 小时稳定性验收、监控历史聚合和告警通知，但不能先放开写入型动作。
+   - 最近一次 24 小时采样在第 480/2880 个样本处因连续 3 次失败提前结束，尚未通过长期稳定性门槛；需要在保持系统唤醒且只运行一个 Worker 的条件下重跑。监控不替代权限控制。
 
 3. **Phase 2：外部 Agent 统一接入**
    - 把外部 action proposal 接入持久化审批队列。
@@ -964,6 +986,10 @@ agentgate-control-plane/
 ## 相关文档
 
 - [项目文件导航](docs/README.md)
+- [项目现状](CONTEXT.md)
+- [待办事项](TODO.md)
 - [系统架构](docs/architecture.md)
 - [本地功能验收手册](docs/demo.md)
+- [外部文件客户端](examples/file-client/README.md)
+- [故障排查手册](docs/troubleshooting.md)
 - [项目规格和实施计划](docs/superpowers/)

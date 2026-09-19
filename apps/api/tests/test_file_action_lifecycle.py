@@ -18,6 +18,7 @@ from app.services.worker_protocol import (
     PROTOCOL_VERSION,
     claim_worker_task,
     complete_worker_task,
+    report_worker_result,
     request_digest,
     start_worker_task,
 )
@@ -262,22 +263,32 @@ async def test_restore_conflict_is_terminal_and_never_overwrites_entry(session: 
     ).one()
     worker = _register_worker(session, ["file.restore.v1"])
 
+    result = {
+        "status": "failed",
+        "result_kind": "file_restore",
+        "side_effect": "conflict",
+        "content_sha256": "b" * 64,
+        "size_bytes": 4,
+        "error_code": "destination_conflict",
+        "error_message": "恢复目标已存在，未覆盖",
+    }
     completed = _complete_file_task(
         session,
         task,
         worker,
-        {
-            "status": "failed",
-            "result_kind": "file_restore",
-            "side_effect": "conflict",
-            "content_sha256": "b" * 64,
-            "size_bytes": 4,
-            "error_code": "destination_conflict",
-            "error_message": "恢复目标已存在，未覆盖",
-        },
+        result,
     )
 
     assert completed.status == TaskStatus.FAILED
+    replayed = report_worker_result(
+        session,
+        task_id=task.id,
+        worker_id=worker.id,
+        protocol_version=PROTOCOL_VERSION,
+        request_digest_value=request_digest(task),
+        result=result,
+    )
+    assert replayed.status == TaskStatus.FAILED
     session.expire_all()
     saved_action = session.get(ToolAction, action.id)
     saved_entry = session.get(QuarantineEntry, entry.id)

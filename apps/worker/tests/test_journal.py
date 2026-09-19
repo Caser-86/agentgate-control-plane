@@ -62,3 +62,17 @@ def test_journal_result_bytes_never_exceed_configured_limit(tmp_path: object) ->
     assert len(json.dumps(result, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) <= 256
     assert len(result["status"]) < 10_000
     assert len(result["detail"]) < 10_000
+
+
+def test_journal_keeps_rejected_report_for_reconciliation(tmp_path: object) -> None:
+    journal = WorkerJournal(tmp_path / "journal.db")  # type: ignore[operator]
+    journal.record_started("task-5", "e" * 64, datetime.now(UTC) + timedelta(seconds=30))
+    journal.record_result("task-5", {"status": "succeeded"})
+
+    journal.mark_reconciliation_required("task-5", "result_replay_conflict")
+
+    assert journal.pending_reports() == []
+    assert journal.reconciliation_items() == [
+        ("task-5", "e" * 64, {"status": "succeeded"}, "result_replay_conflict")
+    ]
+    assert journal.has_reconciliation_required() is True

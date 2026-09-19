@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 from sqlalchemy import event, text
+from sqlalchemy.engine import Engine
 from sqlmodel import Session
 
 from app.control.enums import TaskKind, TaskStatus, WorkerStatus
@@ -31,6 +32,7 @@ def test_platform_health_distinguishes_worker_and_target_health(
         assert set(check) >= {"status", "code", "message_zh", "observed_at", "details"}
         assert len(check["details"]) <= 10
         assert "token" not in str(check).lower()
+    assert body["checks"]["outbox"]["message_zh"] == "事件箱可读"
 
 
 def test_platform_self_check_exposes_bounded_operational_metadata_without_secrets(
@@ -158,6 +160,35 @@ def test_platform_endpoints_prefer_recent_heartbeat_over_active_worker_without_o
     assert self_check_response.status_code == 200
     assert self_check_response.json()["worker_heartbeat_age_seconds"] is not None
     assert sum("NULLS LAST" in statement.upper() for statement in executed_sql) == 2
+
+
+def test_platform_health_exposes_worker_execution_block(
+    auth_client: tuple[TestClient, Engine, object],
+) -> None:
+    client, engine, token_file = auth_client
+    authenticate_client(client, token_file)
+    with Session(engine) as session:
+        session.add(
+            WorkerRegistration(
+                name="blocked-platform-worker",
+                version="test",
+                token_digest="blocked-platform-worker-token",
+                status=WorkerStatus.ACTIVE,
+                last_heartbeat_at=utc_now(),
+                execution_status="reconciliation_required",
+                pending_report_count=1,
+                last_error_code="result_replay_conflict",
+            )
+        )
+        session.commit()
+
+    response = client.get("/api/platform/health")
+
+    assert response.status_code == 200
+    worker_check = response.json()["checks"]["worker"]
+    assert worker_check["status"] == "degraded"
+    assert worker_check["code"] == "worker_reconciliation_required"
+    assert worker_check["details"]["pending_report_count"] == 1
 
 
 def test_platform_self_check_rejects_a_stale_database_revision(

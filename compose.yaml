@@ -1,6 +1,7 @@
 services:
   postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_DB: agentgate
       POSTGRES_USER: agentgate
@@ -25,6 +26,7 @@ services:
         condition: service_healthy
   api:
     build: ./apps/api
+    restart: unless-stopped
     env_file:
       - path: .env
         required: false
@@ -52,6 +54,7 @@ services:
       retries: 12
   scheduler:
     build: ./apps/api
+    restart: unless-stopped
     command: ["python", "-m", "app.processes.scheduler"]
     env_file:
       - path: .env
@@ -68,6 +71,7 @@ services:
       disable: true
   control-worker:
     build: ./apps/api
+    restart: unless-stopped
     command: ["python", "-m", "app.processes.control_worker"]
     env_file:
       - path: .env
@@ -88,6 +92,7 @@ services:
       context: ./apps/web
       args:
         VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
+    restart: unless-stopped
     environment:
       AGENTGATE_API_BASE_URL: ${AGENTGATE_API_BASE_URL:-}
     depends_on:

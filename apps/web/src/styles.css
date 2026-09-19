@@ -340,6 +340,19 @@ pre { overflow: auto; margin: 10px 0 0; padding: 12px; border: 1px solid var(--l
 .quarantine-row span { margin-top: 4px; color: var(--muted); font-size: 10px; }
 .quarantine-row code { color: var(--muted); font-size: 9px; }
 .system-link-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.system-health-panel { margin-bottom: 22px; padding: 24px 28px 28px; }
+.system-health-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.system-health-card { min-width: 0; padding: 17px 18px; border: 1px solid var(--line); border-left: 3px solid var(--line-strong); border-radius: 13px; background: var(--surface-soft); }
+.system-health-card.system-health-healthy { border-left-color: var(--mint); }
+.system-health-card.system-health-degraded { border-left-color: var(--amber); }
+.system-health-card.system-health-down { border-left-color: var(--red); }
+.system-health-card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.system-health-card h3 { margin: 6px 0 0; color: var(--ink); font-size: 15px; }
+.system-health-card p { margin: 15px 0 0; color: var(--ink-soft); font-size: 12px; line-height: 1.6; }
+.system-health-facts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
+.system-health-facts > span { display: inline-flex; align-items: center; gap: 5px; padding: 5px 7px; border-radius: 6px; color: var(--muted); background: #ffffff; font-size: 10px; }
+.system-health-facts code { color: var(--ink-soft); font-size: 9px; }
+.system-health-time { display: block; margin-top: 14px; color: var(--faint); font-family: var(--font-mono); font-size: 9px; }
 .system-link-card { display: block; padding: 25px; color: inherit; text-decoration: none; transition: border-color 150ms ease, transform 150ms ease, box-shadow 150ms ease; }
 .system-link-card:hover { border-color: #b9c8f4; box-shadow: 0 14px 30px rgba(16, 24, 40, 0.09); transform: translateY(-2px); }
 .system-link-card h2 { margin: 8px 0 10px; color: var(--ink); font-size: 19px; }
@@ -394,7 +407,7 @@ pre { overflow: auto; margin: 10px 0 0; padding: 12px; border: 1px solid var(--l
   .file-governance-form label:last-of-type, .file-governance-note, .file-governance-form-footer { grid-column: auto; }
   .file-governance-form-footer { align-items: flex-start; flex-direction: column; }
   .file-governance-form-footer .button { width: 100%; }
-  .workspace-grid, .system-link-grid { grid-template-columns: 1fr; }
+  .workspace-grid, .system-link-grid, .system-health-grid { grid-template-columns: 1fr; }
   .action-filter-bar, .workspace-form { grid-template-columns: 1fr; }
   .workspace-form-footer { align-items: flex-start; flex-direction: column; }
   .action-card-main { flex-direction: column; }

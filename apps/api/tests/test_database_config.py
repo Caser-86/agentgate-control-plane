@@ -60,3 +60,12 @@ def test_disabled_auth_is_allowed_in_development(monkeypatch: pytest.MonkeyPatch
         assert get_settings().auth_enabled is False
     finally:
         get_settings.cache_clear()
+
+
+def test_interactive_api_docs_are_only_enabled_for_local_development() -> None:
+    from app.config import Settings
+
+    assert Settings.model_construct(environment="development").api_docs_enabled is True
+    assert Settings.model_construct(environment="test").api_docs_enabled is True
+    assert Settings.model_construct(environment="production").api_docs_enabled is False
+    assert Settings.model_construct(environment="staging").api_docs_enabled is False

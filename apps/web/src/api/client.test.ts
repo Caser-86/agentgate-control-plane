@@ -59,6 +59,26 @@ describe("api client", () => {
     );
   });
 
+  it("keeps known external proposal errors in Chinese", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: { code: "unknown_action", message: "Proposal denied" } }), {
+          status: 403,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+
+    await expect(api.getExternalActionStatus("client-token", "missing")).rejects.toEqual(
+      expect.objectContaining({
+        code: "unknown_action",
+        message: "动作未注册，不在允许列表中。",
+        status: 403,
+      }),
+    );
+  });
+
   it("accepts empty 204 responses for revoke and logout operations", async () => {
     vi.stubGlobal(
       "fetch",

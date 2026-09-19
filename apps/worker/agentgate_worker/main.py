@@ -118,7 +118,7 @@ def run_worker_loop(
             if wait_for_stop(poll_seconds):
                 return
         except WorkerProtocolError as error:
-            print(f"Worker request failed: {error}")
+            print(f"Worker 请求失败：{error}")
             if wait_for_stop(retry_delay):
                 return
             retry_delay = min(retry_delay * 2, 30.0)
@@ -167,7 +167,7 @@ def main() -> int:
         else:
             run_worker_cycle(client)
     except WorkerProtocolError as error:
-        print(f"Worker request failed: {error}")
+        print(f"Worker 请求失败：{error}")
         return 1
     return 0
 

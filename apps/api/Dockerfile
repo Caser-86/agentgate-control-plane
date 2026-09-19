@@ -7,11 +7,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 COPY pyproject.toml ./
+COPY requirements.lock ./
 COPY alembic.ini ./
 COPY app ./app
 COPY migrations ./migrations
 
-RUN pip install . \
+RUN pip install --requirement requirements.lock \
+    && pip install --no-deps . \
     && useradd --create-home --uid 10001 agentgate \
     && mkdir -p /app/data \
     && chown -R agentgate:agentgate /app

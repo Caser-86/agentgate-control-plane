@@ -5,6 +5,7 @@ from pathlib import Path
 
 from sqlmodel import Session
 
+from app.config import Settings
 from app.db import create_db_and_tables, create_db_engine
 from app.evals.cases import EVAL_CASES, EvalCase
 from app.evals.graders import (
@@ -92,7 +93,16 @@ async def run_case(case: EvalCase) -> CaseEvaluation:
                     await approval_service.approve(pending[0].id, "eval-runner")
                 else:
                     await approval_service.deny(pending[0].id, "eval-runner")
-                await asyncio.to_thread(ControlWorker(engine).run_once)
+                eval_settings = Settings(
+                    llm_provider="mock",
+                    llm_model="mock-operations-agent",
+                    database_url="sqlite://",
+                    environment="test",
+                    auth_enabled=True,
+                )
+                await asyncio.to_thread(
+                    ControlWorker(engine, settings=eval_settings).run_once
+                )
                 session.expire_all()
 
         final_run = RunRepository(session).get(run_id)

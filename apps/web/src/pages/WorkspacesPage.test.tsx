@@ -27,5 +27,9 @@ describe("WorkspacesPage", () => {
     expect(screen.getAllByText("源码工作区").length).toBeGreaterThan(0);
     expect(screen.getByText(/只显示给本地管理员/)).toBeVisible();
     expect(screen.getAllByText(".env").length).toBeGreaterThan(0);
+    expect(screen.getByLabelText("名称")).toHaveAttribute("name", "name");
+    expect(screen.getByLabelText("名称")).toHaveAttribute("autocomplete", "off");
+    expect(screen.getByLabelText("Windows 根目录")).toHaveAttribute("name", "root_path");
+    expect(screen.getByLabelText("保护规则")).toHaveAttribute("name", "protected_patterns");
   });
 });

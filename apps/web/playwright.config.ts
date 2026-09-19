@@ -56,7 +56,7 @@ const webServers = serverState.flatMap((project) => {
   };
   return [
     {
-      command: `${pythonExecutable} -m uvicorn app.main:app --host 127.0.0.1 --port ${project.apiPort}`,
+      command: `${pythonExecutable} e2e_server.py ${project.apiPort}`,
       cwd: "../api",
       env: apiEnv,
       url: `${apiUrl}/health`,

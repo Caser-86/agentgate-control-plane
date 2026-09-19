@@ -35,7 +35,8 @@ WorkerDep = Annotated[WorkerIdentity, Depends(require_worker)]
 
 def _error(error: WorkerProtocolError) -> HTTPException:
     return HTTPException(
-        error.status_code, detail={"code": error.code, "message": "Worker request denied"}
+        error.status_code,
+        detail={"code": error.code, "message": f"Worker 请求被拒绝：{error.code}"},
     )
 
 
@@ -43,7 +44,8 @@ def _bearer_token(request: Request) -> str:
     scheme, separator, token = request.headers.get("Authorization", "").partition(" ")
     if scheme.lower() != "bearer" or not separator or not token:
         raise HTTPException(
-            401, detail={"code": "authentication_required", "message": "Worker request denied"}
+            401,
+            detail={"code": "authentication_required", "message": "Worker 请求需要有效凭据。"},
         )
     return token
 
@@ -69,7 +71,12 @@ def register(
 def worker_heartbeat(request: ProtocolRequest, worker: WorkerDep, session: SessionDep) -> Response:
     try:
         heartbeat(
-            session, worker_id=UUID(worker.worker_id), protocol_version=request.protocol_version
+            session,
+            worker_id=UUID(worker.worker_id),
+            protocol_version=request.protocol_version,
+            execution_status=request.execution_status,
+            pending_report_count=request.pending_report_count,
+            last_error_code=request.last_error_code,
         )
     except WorkerProtocolError as error:
         raise _error(error) from error

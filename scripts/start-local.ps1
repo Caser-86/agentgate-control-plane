@@ -45,6 +45,14 @@ if ($LASTEXITCODE -ne 0) { throw "Database migration failed." }
 
 Write-Host "Starting API, scheduler, control-worker and web..."
 docker compose up -d --build api scheduler control-worker web
+if ($LASTEXITCODE -ne 0) { throw "Docker Compose build or service startup failed." }
+$runningServices = @(docker compose ps --services --status running)
+if ($LASTEXITCODE -ne 0) { throw "Could not inspect running Compose services." }
+foreach ($requiredService in @("api", "scheduler", "control-worker", "web")) {
+    if ($runningServices -notcontains $requiredService) {
+        throw "Required Compose service is not running: $requiredService"
+    }
+}
 $deadline = (Get-Date).AddSeconds(60)
 $healthy = $false
 while ((Get-Date) -lt $deadline) {

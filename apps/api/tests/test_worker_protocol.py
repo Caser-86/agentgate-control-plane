@@ -233,6 +233,51 @@ def test_heartbeat_is_bound_to_registered_worker_and_protocol(
         assert worker.last_heartbeat_at is not None
 
 
+def test_heartbeat_persists_worker_execution_state(
+    auth_client: tuple[TestClient, Engine, object],
+) -> None:
+    client, engine, _ = auth_client
+    identity = _register_worker(client, engine, name="blocked-worker")
+
+    response = client.post(
+        "/api/v1/worker/heartbeat",
+        headers=_worker_headers(identity),
+        json={
+            "protocol_version": PROTOCOL_VERSION,
+            "execution_status": "reconciliation_required",
+            "pending_report_count": 1,
+            "last_error_code": "result_replay_conflict",
+        },
+    )
+
+    assert response.status_code == 204
+    with Session(engine) as session:
+        worker = session.get(WorkerRegistration, UUID(identity["worker_id"]))
+        assert worker is not None
+        assert worker.execution_status == "reconciliation_required"
+        assert worker.pending_report_count == 1
+        assert worker.last_error_code == "result_replay_conflict"
+
+
+def test_legacy_heartbeat_without_execution_fields_is_not_marked_ready(
+    auth_client: tuple[TestClient, Engine, object],
+) -> None:
+    client, engine, _ = auth_client
+    identity = _register_worker(client, engine, name="legacy-heartbeat-worker")
+
+    response = client.post(
+        "/api/v1/worker/heartbeat",
+        headers=_worker_headers(identity),
+        json={"protocol_version": PROTOCOL_VERSION},
+    )
+
+    assert response.status_code == 204
+    with Session(engine) as session:
+        worker = session.get(WorkerRegistration, UUID(identity["worker_id"]))
+        assert worker is not None
+        assert worker.execution_status == "unknown"
+
+
 def test_start_and_complete_require_claim_owner_and_request_digest(
     auth_client: tuple[TestClient, Engine, object],
 ) -> None:

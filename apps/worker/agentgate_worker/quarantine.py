@@ -107,6 +107,22 @@ def _move_without_replace(source: Path, destination: Path) -> None:
         raise FileActionError("move_failed", "文件移动失败，状态需要复核") from error
 
 
+def _validate_directory_tree(path: Path, *, error_code: str, message: str) -> None:
+    current = path
+    while True:
+        try:
+            metadata = os.lstat(current)
+        except FileNotFoundError as error:
+            raise FileActionError(error_code, message) from error
+        if getattr(metadata, "st_file_attributes", 0) & 0x0400 or current.is_symlink():
+            raise FileActionError(error_code, message)
+        if not stat.S_ISDIR(metadata.st_mode):
+            raise FileActionError(error_code, message)
+        if current == current.parent:
+            return
+        current = current.parent
+
+
 def _validate_missing_destination(context: WorkspaceContext, relative_path: str) -> Path:
     normalized = _normalize_relative_path(relative_path)
     root = Path(context.root_path)
@@ -118,6 +134,11 @@ def _validate_missing_destination(context: WorkspaceContext, relative_path: str)
             raise FileActionError("path_escape", "恢复目标越过工作区边界")
     except ValueError as error:
         raise FileActionError("path_escape", "恢复目标使用了不同卷") from error
+    _validate_directory_tree(
+        root,
+        error_code="reparse_point_denied",
+        message="工作区根目录包含 reparse point 或不可访问",
+    )
     current = root
     for segment in normalized.split("/")[:-1]:
         current = current / segment
@@ -178,6 +199,11 @@ class QuarantineService:
             raise FileActionError("source_changed", "文件摘要已变化，未执行隔离")
         quarantine_root = Path(context.quarantine_root_path)
         quarantine_root.mkdir(parents=True, exist_ok=True)
+        _validate_directory_tree(
+            quarantine_root,
+            error_code="reparse_point_denied",
+            message="隔离区目录包含 reparse point 或不可访问",
+        )
         try:
             if os.stat(source).st_dev != os.stat(quarantine_root).st_dev:
                 raise FileActionError("quarantine_volume_mismatch", "隔离区必须与工作区位于同一卷")
@@ -197,6 +223,7 @@ class QuarantineService:
         entry_id = UUID(str(action_id))
         quarantine_relative = f"entries/{entry_id.hex}/{Path(normalized).name}"
         destination = quarantine_root.joinpath(*quarantine_relative.split("/"))
+        operation_id = f"{action_id}:quarantine"
         if destination.exists():
             raise FileActionError("quarantine_destination_exists", "隔离目标已存在，状态需要复核")
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -204,6 +231,8 @@ class QuarantineService:
             self.journal_path,
             {
                 "phase": "prepared",
+                "operation_id": operation_id,
+                "operation_kind": "quarantine",
                 "action_id": str(action_id),
                 "entry_id": str(entry_id),
                 "workspace_id": context.workspace_id,
@@ -222,6 +251,8 @@ class QuarantineService:
             self.journal_path,
             {
                 "phase": "completed",
+                "operation_id": operation_id,
+                "operation_kind": "quarantine",
                 "action_id": str(action_id),
                 "entry_id": str(entry_id),
                 "workspace_id": context.workspace_id,
@@ -249,6 +280,11 @@ class QuarantineService:
         if entry.status == "restored":
             return RestoreResult("restored", entry.id, entry.content_sha256, entry.size_bytes)
         source = Path(entry.quarantine_absolute_path)
+        _validate_directory_tree(
+            source.parent,
+            error_code="reparse_point_denied",
+            message="隔离文件父目录包含 reparse point 或不可访问",
+        )
         try:
             destination = _validate_missing_destination(context, entry.original_relative_path)
         except FileActionError as error:
@@ -267,10 +303,13 @@ class QuarantineService:
         digest, size = _sha256(source)
         if digest != entry.content_sha256 or size != entry.size_bytes:
             raise FileActionError("quarantine_digest_mismatch", "隔离文件摘要不匹配")
+        operation_id = f"{entry.action_id}:restore:{entry.id}"
         _append_journal(
             self.journal_path,
             {
                 "phase": "restore_prepared",
+                "operation_id": operation_id,
+                "operation_kind": "restore",
                 "action_id": str(entry.action_id),
                 "entry_id": str(entry.id),
             },
@@ -280,6 +319,8 @@ class QuarantineService:
             self.journal_path,
             {
                 "phase": "restore_completed",
+                "operation_id": operation_id,
+                "operation_kind": "restore",
                 "action_id": str(entry.action_id),
                 "entry_id": str(entry.id),
             },
@@ -289,20 +330,27 @@ class QuarantineService:
 
 def recover_incomplete_journal(journal_path: Path) -> list[RecoveryNotice]:
     records = _read_journal(journal_path)
-    completed = {
-        str(record.get("action_id"))
-        for record in records
-        if record.get("phase") in {"completed", "restore_completed"}
-    }
-    prepared = {
-        str(record.get("action_id"))
-        for record in records
-        if record.get("phase") in {"prepared", "restore_prepared"}
-    }
+    completed: set[str] = set()
+    prepared: dict[str, str] = {}
+    for record in records:
+        phase = record.get("phase")
+        action_id = str(record.get("action_id"))
+        if not action_id or action_id == "None":
+            continue
+        operation_id = record.get("operation_id")
+        if not isinstance(operation_id, str) or not operation_id:
+            operation_kind = record.get("operation_kind")
+            if not isinstance(operation_kind, str) or not operation_kind:
+                operation_kind = "restore" if phase == "restore_prepared" else "quarantine"
+            operation_id = f"legacy:{action_id}:{operation_kind}"
+        if phase in {"completed", "restore_completed"}:
+            completed.add(operation_id)
+        elif phase in {"prepared", "restore_prepared"}:
+            prepared[operation_id] = action_id
     return [
         RecoveryNotice(action_id=action_id, decision="manual_review_required")
-        for action_id in sorted(prepared - completed)
-        if action_id and action_id != "None"
+        for operation_id, action_id in sorted(prepared.items())
+        if operation_id not in completed
     ]
 
 

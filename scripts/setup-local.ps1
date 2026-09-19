@@ -21,8 +21,10 @@ if (-not (Test-Path -LiteralPath $workerPython)) {
     }
     if ($LASTEXITCODE -ne 0) { throw "Could not create the local Worker virtual environment at apps/worker/.venv." }
 }
-& $workerPython -m pip install -e $workerRoot
+& $workerPython -m pip install --requirement (Join-Path $workerRoot "requirements-dev.lock")
 if ($LASTEXITCODE -ne 0) { throw "Could not install apps/worker dependencies into apps/worker/.venv." }
+& $workerPython -m pip install -e $workerRoot --no-deps
+if ($LASTEXITCODE -ne 0) { throw "Could not install the local Worker package into apps/worker/.venv." }
 & $workerPython -c "import win32crypt; import agentgate_worker"
 if ($LASTEXITCODE -ne 0) { throw "apps/worker/.venv is missing win32crypt/pywin32; rerun .\scripts\setup-local.ps1." }
 Push-Location $webRoot

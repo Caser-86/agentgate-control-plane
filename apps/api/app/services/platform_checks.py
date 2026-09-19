@@ -47,7 +47,7 @@ def platform_health(session: Session) -> dict[str, dict[str, object]]:
         session.exec(cast(Any, select(func.count()).select_from(ControlTask))).one()
         checks["queue"] = check(status="ok", code="queue_ready", message_zh="持久化队列可读")
         session.exec(cast(Any, select(func.count()).select_from(OutboxEvent))).one()
-        checks["outbox"] = check(status="ok", code="outbox_ready", message_zh="Outbox 可读")
+        checks["outbox"] = check(status="ok", code="outbox_ready", message_zh="事件箱可读")
     except Exception:
         checks["database"] = check(
             status="error", code="database_unavailable", message_zh="数据库不可用"
@@ -56,31 +56,51 @@ def platform_health(session: Session) -> dict[str, dict[str, object]]:
             status="error", code="queue_unavailable", message_zh="持久化队列不可用"
         )
         checks["outbox"] = check(
-            status="error", code="outbox_unavailable", message_zh="Outbox 不可用"
+            status="error", code="outbox_unavailable", message_zh="事件箱不可用"
         )
 
     worker = session.exec(
         cast(
             Any,
-            select(cast(Any, WorkerRegistration.last_heartbeat_at))
+            select(WorkerRegistration)
             .where(cast(Any, WorkerRegistration.status) == WorkerStatus.ACTIVE)
-            .order_by(cast(Any, WorkerRegistration.last_heartbeat_at).desc().nullslast()),
+            .order_by(
+                cast(Any, WorkerRegistration.last_heartbeat_at).desc().nullslast()
+            ),
         )
-    ).scalar()
-    heartbeat_age = _heartbeat_age_seconds(worker)
+    ).scalars().first()
+    heartbeat_age = _heartbeat_age_seconds(worker.last_heartbeat_at if worker else None)
+    execution_status = worker.execution_status if worker else "unknown"
+    pending_report_count = worker.pending_report_count if worker else 0
+    last_error_code = worker.last_error_code if worker else None
+    worker_is_recent = heartbeat_age is not None and heartbeat_age <= 90
+    worker_is_blocked = execution_status in {"blocked", "reconciliation_required"}
+    if not worker_is_recent:
+        worker_code = "worker_heartbeat_missing_or_stale"
+        worker_message = "Worker 心跳缺失或过期"
+    elif execution_status == "reconciliation_required":
+        worker_code = "worker_reconciliation_required"
+        worker_message = "Worker 需要对账，暂不领取新任务"
+    elif execution_status == "blocked":
+        worker_code = "worker_execution_blocked"
+        worker_message = "Worker 执行受阻，暂不领取新任务"
+    else:
+        worker_code = "worker_heartbeat_recent"
+        worker_message = "Worker 心跳正常"
     checks["worker"] = check(
-        status="ok" if heartbeat_age is not None and heartbeat_age <= 90 else "degraded",
-        code=(
-            "worker_heartbeat_recent"
-            if heartbeat_age is not None and heartbeat_age <= 90
-            else "worker_heartbeat_missing_or_stale"
-        ),
-        message_zh=(
-            "Worker 心跳正常"
-            if heartbeat_age is not None and heartbeat_age <= 90
-            else "Worker 心跳缺失或过期"
-        ),
-        details={"age_seconds": heartbeat_age} if heartbeat_age is not None else {},
+        status="ok" if worker_is_recent and not worker_is_blocked else "degraded",
+        code=worker_code,
+        message_zh=worker_message,
+        details={
+            key: value
+            for key, value in {
+                "age_seconds": heartbeat_age,
+                "execution_status": execution_status,
+                "pending_report_count": pending_report_count,
+                "last_error_code": last_error_code,
+            }.items()
+            if value is not None
+        },
     )
     return checks
 

@@ -193,6 +193,84 @@ class WorkerJournal:
             ).fetchall()
         return [(str(task_id), str(digest), json.loads(result)) for task_id, digest, result in rows]
 
+    def mark_reconciliation_required(self, task_id: str, reason_code: str) -> None:
+        if not task_id or not reason_code or len(reason_code) > 128:
+            raise ValueError("invalid reconciliation item")
+        now = datetime.now().isoformat()
+        with self._connection() as connection:
+            changed = connection.execute(
+                """
+                UPDATE worker_journal
+                SET status = 'reconciliation_required', updated_at = ?
+                WHERE task_id = ? AND status = 'report_pending'
+                """,
+                (now, task_id),
+            ).rowcount
+            if changed != 1:
+                raise ValueError("reconciliation requires a pending report")
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS worker_reconciliation (
+                    task_id TEXT PRIMARY KEY,
+                    reason_code TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+            connection.execute(
+                """
+                INSERT INTO worker_reconciliation (task_id, reason_code, created_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(task_id) DO UPDATE SET reason_code = excluded.reason_code
+                """,
+                (task_id, reason_code, now),
+            )
+
+    def reconciliation_items(self) -> list[tuple[str, str, dict[str, object], str]]:
+        with self._connection() as connection:
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS worker_reconciliation (
+                    task_id TEXT PRIMARY KEY,
+                    reason_code TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+            rows = connection.execute(
+                """
+                SELECT journal.task_id, journal.request_digest, journal.result_json,
+                       reconciliation.reason_code
+                FROM worker_journal AS journal
+                JOIN worker_reconciliation AS reconciliation
+                  ON reconciliation.task_id = journal.task_id
+                WHERE journal.status = 'reconciliation_required'
+                ORDER BY journal.created_at
+                """
+            ).fetchall()
+        return [
+            (str(task_id), str(digest), json.loads(result), str(reason_code))
+            for task_id, digest, result, reason_code in rows
+        ]
+
+    def has_reconciliation_required(self) -> bool:
+        with self._connection() as connection:
+            row = connection.execute(
+                """
+                SELECT 1 FROM worker_journal
+                WHERE status = 'reconciliation_required'
+                LIMIT 1
+                """
+            ).fetchone()
+        return row is not None
+
+    def pending_report_count(self) -> int:
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT COUNT(*) FROM worker_journal WHERE status = 'report_pending'"
+            ).fetchone()
+        return int(row[0]) if row is not None else 0
+
     def mark_reported(self, task_id: str) -> None:
         with self._connection() as connection:
             connection.execute("DELETE FROM worker_journal WHERE task_id = ?", (task_id,))

@@ -83,7 +83,9 @@ def test_unknown_action_and_unregistered_target_are_rejected(
     )
 
     assert unknown.status_code == 403
+    assert unknown.json()["error"]["message"] == "动作未注册，不在允许列表中。"
     assert unregistered_target.status_code == 422
+    assert unregistered_target.json()["error"]["message"] == "动作参数不合法，请检查后重试。"
 
 
 def test_scope_denial_precedes_action_proposal(

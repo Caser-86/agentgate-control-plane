@@ -52,6 +52,25 @@ describe("AppShell Worker 状态", () => {
     expect(await screen.findByTestId("worker-health")).toHaveTextContent("需要检查");
   });
 
+  it("displays an execution-blocked Worker when reconciliation is required", async () => {
+    vi.mocked(api.getPlatformHealth).mockResolvedValue({
+      ...health("ok"),
+      status: "degraded",
+      checks: {
+        worker: {
+          ...health("ok").checks.worker,
+          status: "degraded",
+          code: "worker_reconciliation_required",
+          message_zh: "Worker 需要对账",
+          details: { execution_status: "reconciliation_required", pending_report_count: 1 },
+        },
+      },
+    });
+    render(<MemoryRouter><AppShell /></MemoryRouter>);
+
+    expect(await screen.findByTestId("worker-health")).toHaveTextContent("执行受阻");
+  });
+
   it("displays an unavailable Worker when the health request fails", async () => {
     vi.mocked(api.getPlatformHealth).mockRejectedValue(new Error("offline"));
     render(<MemoryRouter><AppShell /></MemoryRouter>);

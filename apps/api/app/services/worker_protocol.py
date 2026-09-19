@@ -3,7 +3,7 @@ import json
 import re
 from dataclasses import dataclass
 from datetime import UTC
-from typing import Annotated, Any, cast
+from typing import Annotated, Any, Literal, cast
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
@@ -75,6 +75,9 @@ class RegisterWorkerRequest(_ProtocolModel):
 
 class ProtocolRequest(_ProtocolModel):
     protocol_version: Annotated[str, Field(min_length=1, max_length=16)]
+    execution_status: Literal["ready", "blocked", "reconciliation_required", "unknown"] = "unknown"
+    pending_report_count: Annotated[int, Field(ge=0, le=1000)] = 0
+    last_error_code: Annotated[str | None, Field(default=None, max_length=128)] = None
 
 
 class ClaimRequest(ProtocolRequest):
@@ -393,12 +396,23 @@ def register_worker(
         raise
 
 
-def heartbeat(session: Session, *, worker_id: UUID, protocol_version: str) -> None:
+def heartbeat(
+    session: Session,
+    *,
+    worker_id: UUID,
+    protocol_version: str,
+    execution_status: str = "unknown",
+    pending_report_count: int = 0,
+    last_error_code: str | None = None,
+) -> None:
     worker = session.get(WorkerRegistration, worker_id)
     if worker is None or worker.status != WorkerStatus.ACTIVE:
         raise WorkerProtocolError(401, "authentication_required")
     _require_protocol(protocol_version, worker.protocol_version)
     worker.last_heartbeat_at = utc_now()
+    worker.execution_status = execution_status
+    worker.pending_report_count = pending_report_count
+    worker.last_error_code = last_error_code
     worker.updated_at = worker.last_heartbeat_at
     session.add(worker)
     _audit(session, event_type="worker.heartbeat", worker_id=worker.id, payload={})
@@ -691,6 +705,6 @@ def report_worker_result(
         request_digest_value=request_digest_value,
         result=result,
     )
-    if completed.status != TaskStatus.SUCCEEDED:
+    if completed.status not in {TaskStatus.SUCCEEDED, TaskStatus.FAILED}:
         raise WorkerProtocolError(409, "task_not_completed")
     return completed

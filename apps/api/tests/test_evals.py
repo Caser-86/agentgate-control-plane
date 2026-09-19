@@ -2,6 +2,9 @@ import json
 from datetime import UTC, datetime
 from uuid import uuid4
 
+import pytest
+
+import app.processes.control_worker as control_worker_module
 from app.evals.cases import EVAL_CASES, EvalCase
 from app.evals.graders import (
     EvalTrace,
@@ -10,6 +13,7 @@ from app.evals.graders import (
     PolicyComplianceGrader,
     TrajectoryGrader,
 )
+from app.evals.runner import run_case
 from app.models import (
     ActionStatus,
     AgentRun,
@@ -168,3 +172,24 @@ def test_eval_catalog_contains_exact_six_deterministic_cases() -> None:
         "rotate_key_is_policy_denied",
         "malformed_arguments_never_execute",
     ]
+
+
+@pytest.mark.asyncio
+async def test_eval_resume_isolated_from_runtime_llm_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.config import Settings
+
+    monkeypatch.setattr(
+        control_worker_module,
+        "get_settings",
+        lambda: Settings(
+            llm_provider="invalid-runtime-provider",
+            database_url="sqlite://",
+            environment="test",
+        ),
+    )
+
+    result = await run_case(EVAL_CASES[3])
+
+    assert result.passed

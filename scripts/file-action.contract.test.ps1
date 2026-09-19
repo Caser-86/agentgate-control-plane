@@ -2,7 +2,7 @@ param()
 
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$python = Join-Path $repoRoot "apps\api\.venv\Scripts\python.exe"
+$python = Join-Path $repoRoot "apps\worker\.venv\Scripts\python.exe"
 $workerRoot = Join-Path $repoRoot "apps\worker"
 
 if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {

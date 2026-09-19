@@ -32,7 +32,17 @@ ActionClientDep = Annotated[ClientIdentity, Depends(require_client_scope("propos
 
 
 def _deny(code: str) -> HTTPException:
-    return HTTPException(status_code=403, detail={"code": code, "message": "Proposal denied"})
+    messages = {
+        "unknown_action": "动作未注册，不在允许列表中。",
+        "invalid_self_check_target": "自检只能针对本机且不能携带额外参数。",
+        "check_must_be_read_only": "检查动作必须是只读动作。",
+        "unsupported_check": "当前检查类型暂不支持。",
+        "unsupported_phase_zero_check": "当前阶段不支持此类检查。",
+    }
+    return HTTPException(
+        status_code=403,
+        detail={"code": code, "message": messages.get(code, "动作请求被拒绝。")},
+    )
 
 
 def _validate_registered_target(
@@ -48,7 +58,7 @@ def _validate_registered_target(
     except ValidationError as exc:
         raise HTTPException(
             status_code=422,
-            detail={"code": "invalid_proposal", "message": "Proposal parameters are invalid"},
+            detail={"code": "invalid_proposal", "message": "动作参数不合法，请检查后重试。"},
         ) from exc
     return registered, normalized
 
@@ -151,7 +161,7 @@ def get_check_status(
     if task is None:
         raise HTTPException(
             status_code=404,
-            detail={"code": "not_found", "message": "check was not found"},
+            detail={"code": "not_found", "message": "检查任务不存在。"},
         )
     return TaskStatusResponse(
         id=task.id,

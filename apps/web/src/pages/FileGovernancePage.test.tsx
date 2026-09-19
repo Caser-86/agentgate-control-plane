@@ -46,6 +46,10 @@ describe("FileGovernancePage", () => {
 
     expect(await screen.findByRole("heading", { name: "文件治理" })).toBeVisible();
     expect(screen.queryByText(/演示|面试/)).not.toBeInTheDocument();
+    expect(screen.getByLabelText("工作区")).toHaveAttribute("name", "workspace_id");
+    expect(screen.getByLabelText("动作类型")).toHaveAttribute("name", "action");
+    expect(screen.getByLabelText("相对路径")).toHaveAttribute("name", "relative_path");
+    expect(screen.getByLabelText("相对路径")).toHaveAttribute("autocomplete", "off");
     await user.type(screen.getByLabelText("相对路径"), "README.md");
     await user.click(screen.getByRole("button", { name: "提交文件动作" }));
 

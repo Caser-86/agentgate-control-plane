@@ -3,7 +3,7 @@ from datetime import UTC, datetime, timedelta
 import httpx
 import pytest
 
-from agentgate_worker.client import HttpTransport, WorkerClient
+from agentgate_worker.client import HttpTransport, WorkerClient, WorkerProtocolError
 from agentgate_worker.journal import WorkerJournal
 from agentgate_worker.vault import WorkerCredentials
 
@@ -152,3 +152,51 @@ def test_worker_client_rejects_unsafe_api_url_even_with_custom_transport(
             capabilities={"platform.self_check"},
             transport=RecordingTransport(),
         )
+
+
+def test_http_transport_preserves_structured_server_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    response = httpx.Response(
+        409,
+        json={"detail": {"code": "result_replay_conflict", "message": "not exposed"}},
+    )
+    monkeypatch.setattr("httpx.request", lambda *args, **kwargs: response)
+
+    with pytest.raises(WorkerProtocolError) as raised:
+        HttpTransport("http://localhost:8000").request(
+            "POST", "/api/v1/worker/tasks/task-1/report", headers={}, json={}
+        )
+
+    assert raised.value.status_code == 409
+    assert raised.value.code == "result_replay_conflict"
+
+
+def test_client_keeps_rejected_report_for_reconciliation(tmp_path: object) -> None:
+    journal = WorkerJournal(tmp_path / "journal.db")  # type: ignore[operator]
+    journal.record_started("task-6", "f" * 64, datetime.now(UTC) + timedelta(seconds=30))
+    journal.record_result("task-6", {"status": "succeeded"})
+
+    class ConflictTransport(RecordingTransport):
+        def request(self, method, path, *, headers, json):  # type: ignore[no-untyped-def]
+            raise WorkerProtocolError(
+                "result replay conflict", status_code=409, code="result_replay_conflict"
+            )
+
+    client = WorkerClient(
+        base_url="http://localhost:8000",
+        vault=InMemoryVault(),
+        journal=journal,
+        transport=ConflictTransport(),
+        worker_name="local-worker",
+        worker_version="0.1.0",
+        capabilities={"platform.self_check"},
+    )
+    client.vault.save(WorkerCredentials("worker-1", "worker-token", "1.0"))
+
+    with pytest.raises(WorkerProtocolError, match="reconciliation") as raised:
+        client.recover_pending_reports()
+
+    assert raised.value.code == "reconciliation_required"
+    assert journal.has_reconciliation_required() is True
+    assert len(journal.reconciliation_items()) == 1
